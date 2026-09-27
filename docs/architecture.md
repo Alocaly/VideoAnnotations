@@ -33,6 +33,7 @@ are not validated in this milestone.
 - `src/project.rs`: exactly one source video and its annotation collection.
 - `src/annotations.rs`: video-coordinate shape data, hit testing, bounded translation.
 - `src/editor.rs`: annotation tools, selection, gestures, style controls, preview overlay (step 3).
+- `src/timeline.rs`: annotation tracks, temporal controls, creation and stacking controls (step 4); returns pause/seek actions to the player UI.
 - `src/export.rs`: reserved boundary for step 6; no export implementation yet.
 
 The worker serializes decoding and discards queued obsolete requests before the

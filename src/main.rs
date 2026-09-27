@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
+mod timeline;
 mod ui;
 
 fn main() -> eframe::Result {
@@ -7,7 +8,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 820.0])
-            .with_min_inner_size([760.0, 560.0]),
+            .with_min_inner_size([900.0, 760.0]),
         ..Default::default()
     };
     eframe::run_native(

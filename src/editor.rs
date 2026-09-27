@@ -7,7 +7,7 @@ use video_annotations::{
 #[derive(Default)]
 pub struct Editor {
     tool: Option<Kind>,
-    selected: Option<usize>,
+    pub(crate) selected: Option<usize>,
     drag: Option<Drag>,
 }
 enum Drag {
@@ -54,6 +54,26 @@ impl Mapping {
 }
 
 impl Editor {
+    pub(crate) fn select(&mut self, project: &mut Project, index: usize) {
+        self.cancel(project);
+        self.selected = Some(index);
+    }
+
+    pub(crate) fn reorder(&mut self, project: &mut Project, forward: bool) {
+        self.cancel(project);
+        if let Some(index) = self.selected {
+            let target = if forward {
+                index + 1
+            } else {
+                index.saturating_sub(1)
+            };
+            if target < project.annotations.len() {
+                project.annotations.swap(index, target);
+                self.selected = Some(target);
+            }
+        }
+    }
+
     pub fn can_toggle_fullscreen(&self) -> bool {
         self.tool.is_none() && self.selected.is_none() && self.drag.is_none()
     }
@@ -173,6 +193,7 @@ impl Editor {
         response: &egui::Response,
         rect: Rect,
         project: &mut Project,
+        time: f64,
     ) -> bool {
         let map = Mapping {
             rect,
@@ -196,12 +217,10 @@ impl Editor {
             if let Some(kind) = self.tool {
                 if kind != Kind::Text {
                     let index = project.annotations.len();
-                    project.annotations.push(Annotation::new(
-                        kind,
-                        point,
-                        point,
-                        project.video.duration,
-                    ));
+                    project.annotations.push(
+                        Annotation::new(kind, point, point, project.video.duration)
+                            .at_playhead(time, project.video.duration),
+                    );
                     self.selected = Some(index);
                     self.drag = Some(Drag::Create {
                         index,
@@ -210,12 +229,16 @@ impl Editor {
                 }
             } else {
                 let handle = self.selected.and_then(|index| {
-                    project.annotations.get(index).and_then(|a| {
-                        handles(a)
-                            .iter()
-                            .position(|p| map.screen(*p).distance(origin) <= 9.0)
-                            .map(|h| (index, h))
-                    })
+                    project
+                        .annotations
+                        .get(index)
+                        .filter(|a| a.visible_at(time, project.video.duration))
+                        .and_then(|a| {
+                            handles(a)
+                                .iter()
+                                .position(|p| map.screen(*p).distance(origin) <= 9.0)
+                                .map(|h| (index, h))
+                        })
                 });
                 if let Some((index, handle)) = handle {
                     self.drag = Some(Drag::Resize {
@@ -224,7 +247,7 @@ impl Editor {
                         handle,
                     });
                 } else {
-                    self.selected = pick(project, point, 6.0 / map.scale());
+                    self.selected = pick(project, point, 6.0 / map.scale(), time);
                     if let Some(index) = self.selected {
                         self.drag = Some(Drag::Move {
                             index,
@@ -249,16 +272,19 @@ impl Editor {
                     point[1].min(map.extent[1] - height),
                 ];
                 let index = project.annotations.len();
-                project.annotations.push(Annotation::new(
-                    Kind::Text,
-                    a,
-                    [a[0] + width, a[1] + height],
-                    project.video.duration,
-                ));
+                project.annotations.push(
+                    Annotation::new(
+                        Kind::Text,
+                        a,
+                        [a[0] + width, a[1] + height],
+                        project.video.duration,
+                    )
+                    .at_playhead(time, project.video.duration),
+                );
                 self.selected = Some(index);
                 self.tool = None;
             } else if self.tool.is_none() {
-                self.selected = pick(project, point, 6.0 / map.scale());
+                self.selected = pick(project, point, 6.0 / map.scale(), time);
             }
         }
         if let Some(drag) = &self.drag
@@ -321,10 +347,18 @@ impl Editor {
             }
         }
         let painter = ui.painter().with_clip_rect(rect);
-        for a in &project.annotations {
+        for a in project
+            .annotations
+            .iter()
+            .filter(|a| a.visible_at(time, project.video.duration))
+        {
             paint(&painter, a, map);
         }
-        if let Some(a) = self.selected.and_then(|i| project.annotations.get(i)) {
+        if let Some(a) = self
+            .selected
+            .and_then(|i| project.annotations.get(i))
+            .filter(|a| a.visible_at(time, project.video.duration))
+        {
             let (min, max) = a.bounds();
             painter.rect_stroke(
                 Rect::from_two_pos(map.screen(min), map.screen(max)),
@@ -347,11 +381,11 @@ impl Editor {
     }
 }
 
-fn pick(project: &Project, p: [f32; 2], tolerance: f32) -> Option<usize> {
+fn pick(project: &Project, p: [f32; 2], tolerance: f32, time: f64) -> Option<usize> {
     project
         .annotations
         .iter()
-        .rposition(|a| a.hit(p, tolerance))
+        .rposition(|a| a.visible_at(time, project.video.duration) && a.hit(p, tolerance))
 }
 fn handles(a: &Annotation) -> Vec<[f32; 2]> {
     if a.kind == Kind::Arrow {
@@ -437,7 +471,7 @@ mod tests {
     fn topmost_selection_and_deletion() {
         let mut project = project();
         project.annotations.push(project.annotations[0].clone());
-        assert_eq!(pick(&project, [50.0, 50.0], 1.0), Some(1));
+        assert_eq!(pick(&project, [50.0, 50.0], 1.0, 0.0), Some(1));
         let mut editor = Editor {
             selected: Some(1),
             ..Default::default()
@@ -447,6 +481,29 @@ mod tests {
         assert_eq!(editor.selected, None);
         editor.delete(&mut project);
         assert_eq!(project.annotations.len(), 1);
+    }
+
+    #[test]
+    fn hidden_shapes_are_not_picked_and_reordering_keeps_selection() {
+        let mut project = project();
+        let mut front = project.annotations[0].clone();
+        front.kind = Kind::Ellipse;
+        front.start_seconds = 2.0;
+        project.annotations.push(front);
+        assert_eq!(pick(&project, [50.0, 50.0], 1.0, 1.0), Some(0));
+        assert_eq!(pick(&project, [50.0, 50.0], 1.0, 2.0), Some(1));
+        let mut editor = Editor {
+            selected: Some(1),
+            ..Default::default()
+        };
+        editor.reorder(&mut project, false);
+        assert_eq!(editor.selected, Some(0));
+        assert_eq!(project.annotations[0].kind, Kind::Ellipse);
+        assert_eq!(pick(&project, [50.0, 50.0], 1.0, 2.0), Some(1));
+        editor.reorder(&mut project, false);
+        assert_eq!(editor.selected, Some(0));
+        editor.reorder(&mut project, true);
+        assert_eq!(editor.selected, Some(1));
     }
 
     #[test]

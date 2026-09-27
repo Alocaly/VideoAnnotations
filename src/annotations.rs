@@ -32,6 +32,43 @@ pub struct Annotation {
 }
 
 impl Annotation {
+    /// Half-open intervals, except the final video endpoint remains visible.
+    pub fn visible_at(&self, time: f64, duration: f64) -> bool {
+        time.is_finite()
+            && time >= self.start_seconds
+            && (time < self.end_seconds || (time == duration && self.end_seconds == duration))
+    }
+
+    pub fn at_playhead(mut self, time: f64, duration: f64) -> Self {
+        let gap = Self::minimum_duration(duration);
+        self.start_seconds =
+            if time.is_finite() { time } else { 0.0 }.clamp(0.0, (duration - gap).max(0.0));
+        self.end_seconds = (self.start_seconds + 5.0).min(duration);
+        self
+    }
+
+    pub fn minimum_duration(duration: f64) -> f64 {
+        duration.clamp(0.0, 0.001)
+    }
+
+    pub fn set_start(&mut self, time: f64, duration: f64) {
+        if time.is_finite() {
+            self.start_seconds = time.clamp(
+                0.0,
+                (self.end_seconds - Self::minimum_duration(duration)).max(0.0),
+            );
+        }
+    }
+
+    pub fn set_end(&mut self, time: f64, duration: f64) {
+        if time.is_finite() {
+            self.end_seconds = time.clamp(
+                (self.start_seconds + Self::minimum_duration(duration)).min(duration),
+                duration,
+            );
+        }
+    }
+
     pub fn new(kind: Kind, a: [f32; 2], b: [f32; 2], duration: f64) -> Self {
         Self {
             kind,
@@ -94,6 +131,34 @@ fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn intervals_use_start_inclusive_end_exclusive_and_include_video_end() {
+        let mut a = Annotation::new(Kind::Text, [0.0; 2], [10.0; 2], 10.0).at_playhead(2.0, 10.0);
+        assert!(!a.visible_at(1.999, 10.0));
+        assert!(a.visible_at(2.0, 10.0));
+        assert!(a.visible_at(6.999, 10.0));
+        assert!(!a.visible_at(7.0, 10.0));
+        a.set_end(10.0, 10.0);
+        assert!(a.visible_at(10.0, 10.0));
+        assert!(!a.visible_at(f64::NAN, 10.0));
+    }
+    #[test]
+    fn timing_edits_are_bounded_and_cannot_invert_an_interval() {
+        let mut a = Annotation::new(Kind::Text, [0.0; 2], [10.0; 2], 10.0).at_playhead(9.0, 10.0);
+        assert_eq!((a.start_seconds, a.end_seconds), (9.0, 10.0));
+        a.set_start(50.0, 10.0);
+        assert!(a.start_seconds < a.end_seconds);
+        a.set_start(-1.0, 10.0);
+        assert_eq!(a.start_seconds, 0.0);
+        a.set_end(-1.0, 10.0);
+        assert_eq!(a.end_seconds, 0.001);
+        a.set_end(f64::NAN, 10.0);
+        assert_eq!(a.end_seconds, 0.001);
+        let eof = a.clone().at_playhead(10.0, 10.0);
+        assert!(eof.start_seconds < eof.end_seconds);
+        let short = a.at_playhead(0.0005, 0.0005);
+        assert_eq!((short.start_seconds, short.end_seconds), (0.0, 0.0005));
+    }
     #[test]
     fn moving_preserves_size_and_arrow_direction_at_edges() {
         let mut a = Annotation::new(Kind::Arrow, [90.0, 80.0], [30.0, 20.0], 5.0);

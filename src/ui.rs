@@ -257,7 +257,7 @@ impl eframe::App for VideoApp {
                 if pause { self.act(|p|p.pause(true)); }
             }
             ui.separator();
-            let size = egui::vec2(ui.available_width(), (ui.available_height() - 150.0).max(100.0));
+            let size = egui::vec2(ui.available_width(), (ui.available_height() - 370.0).max(80.0));
             let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
             ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(12,15,21));
             if let Some(texture) = &self.texture {
@@ -267,7 +267,7 @@ impl eframe::App for VideoApp {
                 ui.painter().image(texture.id(), image_rect,
                     egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
                 if let Some(project)=self.project.as_mut() {
-                    let pause=self.editor.canvas(ui,&response,image_rect,project);
+                    let pause=self.editor.canvas(ui,&response,image_rect,project,state.as_ref().map_or(0.0, |s| s.position));
                     if pause { self.act(|p|p.pause(true)); }
                 }
             } else {
@@ -307,7 +307,12 @@ impl eframe::App for VideoApp {
             }
             ui.separator();
             ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Esc: exit  |  M: mute");
-            ui.small("Annotations are temporary and visible throughout the video. Saving and timing controls arrive in later steps.");
+            ui.small("Annotations are temporary. Saving arrives in step 5.");
+            if let Some(project) = self.project.as_mut() {
+                let action = self.editor.timeline(ui, project, state.as_ref().map_or(0.0, |s| s.position));
+                if action.pause { self.act(|p| p.pause(true)); }
+                if let Some(time) = action.seek { self.act(|p| p.seek(time)); }
+            }
         });
         if self.pending.is_some() {
             let mut discard = false;
