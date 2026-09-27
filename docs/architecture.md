@@ -35,7 +35,8 @@ are not validated in this milestone.
 - `src/annotations.rs`: video-coordinate shape data, hit testing, bounded translation.
 - `src/editor.rs`: annotation tools, selection, gestures, style controls, preview overlay (step 3).
 - `src/timeline.rs`: annotation tracks, temporal controls, creation and stacking controls (step 4); returns pause/seek actions to the player UI.
-- `src/export.rs`: reserved boundary for step 6; no export implementation yet.
+- `src/render.rs`: shared annotation painter and offline egui mesh rasterizer (step 6).
+- `src/export.rs`: cancellable background MP4 encoding, progress, and atomic destination replacement (step 6).
 
 The worker serializes decoding and discards queued obsolete requests before the
 next decode. Each result carries a request ID; the UI ignores obsolete results,
@@ -43,9 +44,9 @@ including those for a previously opened file. Both process pipes are drained
 concurrently and operations time out after 30 seconds. Missing executables,
 invalid media, missing duration, and failed decodes become English UI errors.
 
-The annotation renderer will be shared between preview and export. UI pixels must
-never be persisted as annotation geometry. Playback, project serialization, and
-export codecs are deliberately deferred to their roadmap milestones.
+The annotation painter is shared between preview and export. UI pixels are never
+persisted as annotation geometry. Playback, project serialization, and export are
+now implemented in their respective roadmap milestones; see the linked reports.
 
 ## Dependencies and distribution
 

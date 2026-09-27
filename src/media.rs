@@ -58,7 +58,7 @@ impl Default for MediaBackend {
     }
 }
 
-fn executable(name: &str) -> PathBuf {
+pub(crate) fn executable(name: &str) -> PathBuf {
     let variable = format!("VIDEO_ANNOTATIONS_{}", name.to_uppercase());
     if let Some(path) = std::env::var_os(variable) {
         return path.into();

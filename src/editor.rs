@@ -403,47 +403,7 @@ fn valid(a: &Annotation, scale: f32) -> bool {
     }
 }
 fn paint(p: &egui::Painter, a: &Annotation, map: Mapping) {
-    let color = Color32::from_rgba_unmultiplied(a.color[0], a.color[1], a.color[2], a.color[3]);
-    let stroke = Stroke::new(a.thickness * map.scale(), color);
-    let (min, max) = a.bounds();
-    let rect = Rect::from_two_pos(map.screen(min), map.screen(max));
-    match a.kind {
-        Kind::Rectangle => {
-            p.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
-        }
-        Kind::Ellipse => {
-            p.add(egui::Shape::ellipse_stroke(
-                rect.center(),
-                rect.size() * 0.5,
-                stroke,
-            ));
-        }
-        Kind::Arrow => {
-            let from = map.screen(a.a);
-            let to = map.screen(a.b);
-            let d = to - from;
-            p.line_segment([from, to], stroke);
-            if d.length() > 0.1 {
-                let unit = d.normalized();
-                let head = (16.0 * map.scale())
-                    .max(stroke.width * 3.0)
-                    .min(d.length() * 0.4);
-                let normal = Vec2::new(-unit.y, unit.x);
-                p.line_segment([to, to - unit * head + normal * head * 0.5], stroke);
-                p.line_segment([to, to - unit * head - normal * head * 0.5], stroke);
-            }
-        }
-        Kind::Text => {
-            let galley = p.layout(
-                a.text.clone(),
-                egui::FontId::proportional(a.font_size * map.scale()),
-                color,
-                rect.width().max(1.0),
-            );
-            p.with_clip_rect(rect.intersect(map.rect))
-                .galley(rect.min, galley, color);
-        }
-    }
+    video_annotations::render::paint(p, a, map.rect, map.extent);
 }
 
 #[cfg(test)]

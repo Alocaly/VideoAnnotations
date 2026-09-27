@@ -14,7 +14,7 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Steps 1 through 5 are implemented. The English-language native player opens a video,
+Steps 1 through 6 are implemented. The English-language native player opens a video,
 plays it with synchronized audio, pauses, seeks, steps one frame in either
 direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
@@ -27,6 +27,8 @@ The annotation timeline controls start/end times, seeking, creation at the
 playhead, and stacking order.
 Projects can be saved and reopened as `.vannot` files, with source-video relinking
 when the original path is missing. Annotation edits support undo and redo.
+Export MP4 burns the annotations into a new H.264 video with AAC source audio,
+progress reporting, and cancellation.
 
 The initial target is Windows. The UI uses egui/eframe; persistent playback uses
 libmpv, with FFmpeg internally. The step-1 FFmpeg/ffprobe extraction backend is
@@ -51,7 +53,7 @@ PATH. Alternatively set `VIDEO_ANNOTATIONS_MPV` to the full path to a compatible
 `libmpv-2.dll`. The app searches `tools/mpv/` from its working directory and from
 the executable's directory and parent directories.
 
-For frame extraction and integration-test fixtures, also install FFmpeg locally
+For MP4 export, frame extraction, and integration-test fixtures, also install FFmpeg locally
 (download provider linked by [FFmpeg](https://ffmpeg.org/download.html)):
 
 ```powershell
@@ -82,6 +84,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 # Requires FFmpeg; generates its own temporary test video:
 cargo test --test media_integration -- --ignored
+# Export integration tests (timing, layers, audio, VFR, cancellation and failure):
+cargo test --test export_integration -- --ignored
 # Playback integration tests with clocked null audio:
 cargo test --test playback_integration -- --ignored --skip system_audio_device
 # Optional real audio device check (plays a quiet test tone briefly):
@@ -99,7 +103,8 @@ Preview rendering currently uses libmpv's software renderer, capped at 1280 x 72
 then uploads the result to an egui texture. Hardware video decoding and HDR color
 management are not yet validated. Backward frame stepping may be slower on long
 GOP videos. The position follows the playback engine; step commands follow actual
-frames, including tested variable-frame-rate media. Export is not available yet.
+frames, including tested variable-frame-rate media. Export currently supports
+SDR MP4 only, up to 32 annotations and 9 megapixels; HDR tone mapping is not implemented.
 Projects reference the source video rather than embedding it; keep the video
 alongside your project. There is no autosave or crash recovery yet. Opening
 another video/project or closing the window offers Save, Discard, and Cancel
@@ -170,9 +175,27 @@ field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo butto
 for project history. Playback, selection, file operations, and source relinking
 are not undoable, and history is not stored in the project file.
 
+## Annotated MP4 export
+
+Choose Export MP4, then a destination different from the source video. The current
+annotation state is exported, including unsaved edits, without saving the project.
+Playback pauses and editing is disabled during the background job. Use Cancel
+export to stop it; wait for completion or cancellation before closing the app.
+The destination is replaced only after successful encoding; failure or cancellation
+leaves an existing destination intact. The source video is never overwritten.
+
+The output uses H.264 (CRF 18), 8-bit YUV 4:2:0, and the first source audio track
+re-encoded to AAC at 192 kb/s when present. Silent videos remain silent. Annotation
+timing and layer order match the preview. Video display dimensions are preserved,
+with at most one padding pixel on the right/bottom for even MP4 dimensions. Source
+frame timestamps are retained without forcing a constant frame rate. Subtitles,
+additional audio tracks, and source metadata are not copied. GIF and effects are
+planned for step 7; output quality/size controls and packaging remain future work.
+
 See [architecture decisions](docs/architecture.md) and the
 [step 1 validation report](docs/step-1-validation.md), and
 [step 2 playback design and validation](docs/step-2-playback.md), and
 [step 3 annotation design and validation](docs/step-3-annotations.md), and
 [step 4 timeline design and validation](docs/step-4-timeline.md), and
-[step 5 persistence design and validation](docs/step-5-persistence.md).
+[step 5 persistence design and validation](docs/step-5-persistence.md), and
+[step 6 export design and validation](docs/step-6-export.md).

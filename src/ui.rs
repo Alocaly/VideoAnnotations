@@ -8,6 +8,9 @@ use video_annotations::{
 };
 
 pub struct VideoApp {
+    export: Option<video_annotations::export::Job>,
+    export_progress: f32,
+    export_message: Option<String>,
     project_path: Option<PathBuf>,
     saved: Option<Project>,
     history: History,
@@ -31,6 +34,9 @@ impl VideoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Option<PathBuf>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let mut app = Self {
+            export: None,
+            export_progress: 0.0,
+            export_message: None,
             project_path: None,
             saved: None,
             history: History::default(),
@@ -68,6 +74,52 @@ impl VideoApp {
         self.project
             .as_ref()
             .is_some_and(|p| self.saved.as_ref() != Some(p))
+    }
+
+    fn start_export(&mut self) {
+        self.act(|p| p.pause(true));
+        let Some(project) = &self.project else {
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export annotated MP4")
+            .add_filter("MP4 video", &["mp4"])
+            .set_file_name("annotated.mp4")
+            .save_file()
+        else {
+            return;
+        };
+        self.export = Some(video_annotations::export::Job::start(project.clone(), path));
+        self.export_progress = 0.0;
+        self.export_message = Some("Preparing export…".into());
+        self.error = None;
+    }
+
+    fn poll_export(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.export else {
+            return;
+        };
+        let mut finished = false;
+        for event in job.events.try_iter() {
+            match event {
+                video_annotations::export::Event::Progress { fraction, message } => {
+                    self.export_progress = fraction;
+                    self.export_message = Some(message);
+                }
+                video_annotations::export::Event::Finished(result) => {
+                    finished = true;
+                    self.export_message = Some(match result {
+                        Ok(path) => format!("Export complete: {}", path.display()),
+                        Err(error) => error,
+                    });
+                }
+            }
+        }
+        if finished {
+            self.export = None;
+        } else {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
     }
 
     fn load_path(&mut self, path: PathBuf) {
@@ -401,17 +453,23 @@ impl VideoApp {
 impl eframe::App for VideoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.dirty() {
+        self.poll_export(&ctx);
+        if ctx.input(|i| i.viewport().close_requested()) && self.export.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.error = Some("Wait for export to finish or cancel it before closing.".into());
+        } else if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.dirty()
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.loading = None;
             self.act(|p| p.pause(true));
             self.pending = Some(Pending::Close);
         }
         self.update_player(&ctx);
-        if self.pending.is_none() && self.loading.is_none() {
+        if self.pending.is_none() && self.loading.is_none() && self.export.is_none() {
             self.shortcuts(&ctx);
         }
         if self.pending.is_none()
+            && self.export.is_none()
             && self.loading.is_none()
             && let Some(path) = ctx.input(|i| {
                 i.raw
@@ -423,6 +481,14 @@ impl eframe::App for VideoApp {
             self.open(path);
         }
         egui::CentralPanel::default().show(ui, |ui| {
+            if let Some(message) = &self.export_message { ui.label(message); }
+            if let Some(job) = &self.export {
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(self.export_progress).desired_width(240.0).show_percentage());
+                    if ui.button("Cancel export").clicked() { job.cancel(); }
+                });
+                ui.disable();
+            }
             if self.loading.is_some() { ui.label("Opening source video… Current project is kept until validation succeeds."); }
             if self.pending.is_some() || self.loading.is_some() { ui.disable(); }
             ui.horizontal_wrapped(|ui| {
@@ -431,6 +497,7 @@ impl eframe::App for VideoApp {
                 if ui.button("Open project...").on_hover_text("Ctrl+Shift+O").clicked() { self.project_picker(); }
                 if ui.add_enabled(self.project.is_some(),egui::Button::new("Save")).on_hover_text("Ctrl+S").clicked() { self.save(false); }
                 if ui.add_enabled(self.project.is_some(),egui::Button::new("Save as...")).on_hover_text("Ctrl+Shift+S").clicked() { self.save(true); }
+                if ui.add_enabled(self.project.is_some(),egui::Button::new("Export MP4...")).on_hover_text("H.264 / AAC, SDR; up to 32 annotations and 9 megapixels").clicked() { self.start_export(); }
                 if ui.add_enabled(self.history.can_undo(),egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.restore_history(false); }
                 if ui.add_enabled(self.history.can_redo(),egui::Button::new("Redo")).on_hover_text("Ctrl+Y / Ctrl+Shift+Z").clicked() { self.restore_history(true); }
                 if ui.button(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }).on_hover_text("F11 / Esc").clicked() { self.toggle_fullscreen(); }
@@ -598,6 +665,9 @@ mod tests {
             5.0,
         ));
         VideoApp {
+            export: None,
+            export_progress: 0.0,
+            export_message: None,
             project_path: None,
             saved: Some(project.clone()),
             history: History::new(&project.annotations),
