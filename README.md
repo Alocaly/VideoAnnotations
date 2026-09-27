@@ -14,11 +14,15 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Steps 1 and 2 are implemented. The English-language native player opens a video,
+Steps 1 through 3 are implemented. The English-language native player opens a video,
 plays it with synchronized audio, pauses, seeks, steps one frame in either
 direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
 drag-and-drop, or a command-line argument.
+
+Add text, rectangles, ellipses, and arrows directly on the preview. Select, move,
+resize, recolor, and delete them using the annotation tools. Geometry and style
+sizes use video coordinates, preserving placement when the window changes size.
 
 The initial target is Windows. The UI uses egui/eframe; persistent playback uses
 libmpv, with FFmpeg internally. The step-1 FFmpeg/ffprobe extraction backend is
@@ -91,8 +95,10 @@ Preview rendering currently uses libmpv's software renderer, capped at 1280 x 72
 then uploads the result to an egui texture. Hardware video decoding and HDR color
 management are not yet validated. Backward frame stepping may be slower on long
 GOP videos. The position follows the playback engine; step commands follow actual
-frames, including tested variable-frame-rate media. No annotations, saving, or
-export are available yet.
+frames, including tested variable-frame-rate media. Annotations currently remain
+visible throughout the video and exist only in memory. Saving, undo/redo, timing,
+and export are not available yet. Opening another video or closing the window
+asks for confirmation before discarding annotations.
 
 ## Player controls
 
@@ -103,7 +109,7 @@ export are available yet.
 | Back / forward one second | Left / Right |
 | Back / forward five seconds | Shift+Left / Shift+Right |
 | Previous / next frame (pauses playback) | Ctrl+Left / Ctrl+Right; also comma / period |
-| Fullscreen | F11 or double-click the preview |
+| Fullscreen | F11 or double-click the preview with no active annotation selection/tool |
 | Exit fullscreen | Esc |
 | Mute | M |
 
@@ -111,6 +117,19 @@ The same navigation actions have buttons. The time slider seeks on release and
 preserves the play/pause state. Keyboard shortcuts do not interfere with typing
 in numeric fields. Opening the file picker pauses the current video.
 
+## Annotation controls
+
+Choose a shape tool and drag on the video; choose Text and click to add a text
+box. Use Select to move an annotation and its blue handles to resize it. Arrows
+have two endpoint handles. Text-box resizing changes wrapping/clipping; Font size
+changes the lettering. The selection menu also reaches covered annotations.
+Color (including opacity), thickness, text content, and font size are editable
+above the preview. Delete removes the selection; Esc cancels an unfinished
+gesture. Delete and player shortcuts do not interfere with text entry.
+
+New annotations are drawn on top. Timing and stacking controls arrive in step 4.
+
 See [architecture decisions](docs/architecture.md) and the
 [step 1 validation report](docs/step-1-validation.md), and
-[step 2 playback design and validation](docs/step-2-playback.md).
+[step 2 playback design and validation](docs/step-2-playback.md), and
+[step 3 annotation design and validation](docs/step-3-annotations.md).

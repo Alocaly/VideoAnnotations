@@ -3,6 +3,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use video_annotations::{media::VideoInfo, playback::Player, project::Project};
 
 pub struct VideoApp {
+    pending: Option<Pending>,
+    allow_close: bool,
+    editor: crate::editor::Editor,
     player: Option<Player>,
     project: Option<Project>,
     source: Option<PathBuf>,
@@ -19,6 +22,9 @@ impl VideoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Option<PathBuf>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let mut app = Self {
+            pending: None,
+            allow_close: false,
+            editor: Default::default(),
             player: None,
             project: None,
             source: None,
@@ -37,9 +43,23 @@ impl VideoApp {
     }
 
     fn open(&mut self, path: PathBuf) {
+        if self
+            .project
+            .as_ref()
+            .is_some_and(|p| !p.annotations.is_empty())
+        {
+            self.act(|p| p.pause(true));
+            self.pending = Some(Pending::Open(path));
+        } else {
+            self.load_video(path);
+        }
+    }
+
+    fn load_video(&mut self, path: PathBuf) {
         // A fresh core isolates asynchronous file events and stops the old audio.
         self.player = None;
         self.project = None;
+        self.editor = Default::default();
         self.texture = None;
         self.scrub = None;
         self.error = None;
@@ -186,8 +206,21 @@ impl VideoApp {
 impl eframe::App for VideoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.allow_close
+            && self
+                .project
+                .as_ref()
+                .is_some_and(|p| !p.annotations.is_empty())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.act(|p| p.pause(true));
+            self.pending = Some(Pending::Close);
+        }
         self.update_player(&ctx);
-        self.shortcuts(&ctx);
+        if self.pending.is_none() {
+            self.shortcuts(&ctx);
+        }
         if let Some(path) = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -197,6 +230,7 @@ impl eframe::App for VideoApp {
             self.open(path);
         }
         egui::CentralPanel::default().show(ui, |ui| {
+            if self.pending.is_some() { ui.disable(); }
             ui.horizontal(|ui| {
                 ui.heading("VideoAnnotations");
                 if ui.button("Open video...").on_hover_text("Ctrl+O").clicked() { self.picker(); }
@@ -215,20 +249,32 @@ impl eframe::App for VideoApp {
                 });
             }
             if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+            if let Some(project) = self.project.as_mut() {
+                let pause = ui.scope(|ui| {
+                    ui.set_min_height(126.0);
+                    self.editor.toolbar(ui, project)
+                }).inner;
+                if pause { self.act(|p|p.pause(true)); }
+            }
             ui.separator();
             let size = egui::vec2(ui.available_width(), (ui.available_height() - 150.0).max(100.0));
-            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
             ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(12,15,21));
             if let Some(texture) = &self.texture {
                 let native = texture.size_vec2();
                 let scale = (rect.width()/native.x).min(rect.height()/native.y);
-                ui.painter().image(texture.id(), egui::Rect::from_center_size(rect.center(), native*scale),
+                let image_rect = egui::Rect::from_center_size(rect.center(), native*scale);
+                ui.painter().image(texture.id(), image_rect,
                     egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
+                if let Some(project)=self.project.as_mut() {
+                    let pause=self.editor.canvas(ui,&response,image_rect,project);
+                    if pause { self.act(|p|p.pause(true)); }
+                }
             } else {
                 ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,"Your video appears here",
                     egui::FontId::proportional(20.0),egui::Color32::GRAY);
             }
-            if response.double_clicked() { self.toggle_fullscreen(); }
+            if response.double_clicked() && self.editor.can_toggle_fullscreen() { self.toggle_fullscreen(); }
             ui.add_space(8.0);
             if let Some(s) = &state {
                 ui.add_enabled_ui(s.loaded, |ui| {
@@ -261,8 +307,40 @@ impl eframe::App for VideoApp {
             }
             ui.separator();
             ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Esc: exit  |  M: mute");
+            ui.small("Annotations are temporary and visible throughout the video. Saving and timing controls arrive in later steps.");
         });
+        if self.pending.is_some() {
+            let mut discard = false;
+            let mut cancel = false;
+            egui::Modal::new(egui::Id::new("discard-annotations")).show(&ctx, |ui| {
+                ui.heading("Discard annotations?");
+                ui.label("This project has annotations that cannot be saved yet.");
+                ui.label("Continuing will discard them.");
+                ui.horizontal(|ui| {
+                    discard = ui.button("Discard annotations").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+            if cancel {
+                self.pending = None;
+            }
+            if discard {
+                match self.pending.take() {
+                    Some(Pending::Open(path)) => self.load_video(path),
+                    Some(Pending::Close) => {
+                        self.allow_close = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    None => {}
+                }
+            }
+        }
     }
+}
+
+enum Pending {
+    Open(PathBuf),
+    Close,
 }
 
 fn timecode(seconds: f64) -> String {

@@ -31,7 +31,8 @@ are not validated in this milestone.
 - `src/ui.rs`: window, file picker, timeline scrubber, texture upload, UI state.
 - `src/media.rs`: probing, decoding, errors, and a background worker; no GUI types.
 - `src/project.rs`: exactly one source video and its annotation collection.
-- `src/annotations.rs`: initial video-coordinate shape data; no editing yet.
+- `src/annotations.rs`: video-coordinate shape data, hit testing, bounded translation.
+- `src/editor.rs`: annotation tools, selection, gestures, style controls, preview overlay (step 3).
 - `src/export.rs`: reserved boundary for step 6; no export implementation yet.
 
 The worker serializes decoding and discards queued obsolete requests before the
