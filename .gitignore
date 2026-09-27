@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+/tools/ffmpeg/
+/tools/downloads/
 
 # Local media and exports
 /Movies_in/
