@@ -88,6 +88,8 @@ cargo test --test media_integration -- --ignored
 cargo test --test export_integration -- --ignored
 # Playback integration tests with clocked null audio:
 cargo test --test playback_integration -- --ignored --skip system_audio_device
+# Real playback clock with the UI seek slider (guards against automatic seeking):
+cargo test --bin video-annotations live_playback_with_seek_slider -- --ignored
 # Optional real audio device check (plays a quiet test tone briefly):
 cargo test --test playback_integration system_audio_device -- --ignored --nocapture
 # Diagnose a local file without the GUI (clocked null audio output):
@@ -122,13 +124,16 @@ when there are unsaved changes.
 | Back / forward one second | Left / Right |
 | Back / forward five seconds | Shift+Left / Shift+Right |
 | Previous / next frame (pauses playback) | Ctrl+Left / Ctrl+Right; also comma / period |
-| Fullscreen | F11 or double-click the preview with no active annotation selection/tool |
+| Video-only fullscreen | F11 or double-click the preview with no active annotation selection/tool |
 | Exit fullscreen | Esc |
 | Mute | M |
 
 The same navigation actions have buttons. The time slider seeks on release and
 preserves the play/pause state. Keyboard shortcuts do not interfere with typing
 in numeric fields. Opening the file picker pauses the current video.
+Fullscreen hides the editor panels and timeline, fitting the video to the screen
+without cropping. Space, seeking keys, and mute still work. F11, Esc, or a
+double-click returns to the editor.
 
 ## Annotation controls
 
@@ -139,6 +144,10 @@ changes the lettering. The selection menu also reaches covered annotations.
 Color (including opacity), thickness, text content, and font size are editable
 above the preview. Delete removes the selection; Esc cancels an unfinished
 gesture. Delete and player shortcuts do not interfere with text entry.
+To edit text, select its annotation (on the preview, in the timeline, or in the
+selection menu), then edit the **Text content** field below the annotation tools.
+Focusing that field pauses playback. Selection bounds and resize handles appear
+only when paused in the editor, never during playback or video-only fullscreen.
 
 New annotations are drawn on top and start at the playhead, lasting five seconds
 or until the video ends. The timeline's Add buttons create a default shape that

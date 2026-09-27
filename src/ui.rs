@@ -314,6 +314,9 @@ impl VideoApp {
     }
 
     fn toggle_fullscreen(&mut self) {
+        if let Some(project) = &mut self.project {
+            self.editor.cancel(project);
+        }
         self.fullscreen = !self.fullscreen;
         self.context
             .send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
@@ -448,6 +451,49 @@ impl VideoApp {
             16
         }));
     }
+
+    fn video_view(&mut self, ui: &mut egui::Ui, size: egui::Vec2, fullscreen: bool) {
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+        let state = self.player.as_ref().map(|p| &p.state);
+        let time = state.map_or(0.0, |s| s.position);
+        let editing = !fullscreen && state.is_none_or(|s| s.paused);
+        let mut pause = false;
+        if let Some(texture) = &self.texture {
+            let native = texture.size_vec2();
+            let scale = (rect.width() / native.x).min(rect.height() / native.y);
+            let image_rect = egui::Rect::from_center_size(rect.center(), native * scale);
+            ui.painter().image(
+                texture.id(),
+                image_rect,
+                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+            if let Some(project) = self.project.as_mut() {
+                if editing {
+                    pause = self.editor.canvas(ui, &response, image_rect, project, time);
+                } else {
+                    // Viewing never draws editor bounds or resize handles.
+                    paint_preview_annotations(ui.painter(), project, image_rect, time);
+                    pause = !fullscreen && response.clicked();
+                }
+            }
+        } else {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Your video appears here",
+                egui::FontId::proportional(20.0),
+                egui::Color32::GRAY,
+            );
+        }
+        if pause {
+            self.act(|p| p.pause(true));
+        }
+        if response.double_clicked() && (fullscreen || self.editor.can_toggle_fullscreen()) {
+            self.toggle_fullscreen();
+        }
+    }
 }
 
 impl eframe::App for VideoApp {
@@ -480,7 +526,17 @@ impl eframe::App for VideoApp {
         {
             self.open(path);
         }
-        egui::CentralPanel::default().show(ui, |ui| {
+        let fullscreen = self.fullscreen;
+        let panel = if fullscreen {
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::BLACK))
+        } else {
+            egui::CentralPanel::default()
+        };
+        panel.show(ui, |ui| {
+            if fullscreen {
+                self.video_view(ui, ui.available_size(), true);
+                return;
+            }
             if let Some(message) = &self.export_message { ui.label(message); }
             if let Some(job) = &self.export {
                 ui.horizontal(|ui| {
@@ -527,23 +583,7 @@ impl eframe::App for VideoApp {
             }
             ui.separator();
             let size = egui::vec2(ui.available_width(), (ui.available_height() - 370.0).max(80.0));
-            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-            ui.painter().rect_filled(rect, 8.0, egui::Color32::from_rgb(12,15,21));
-            if let Some(texture) = &self.texture {
-                let native = texture.size_vec2();
-                let scale = (rect.width()/native.x).min(rect.height()/native.y);
-                let image_rect = egui::Rect::from_center_size(rect.center(), native*scale);
-                ui.painter().image(texture.id(), image_rect,
-                    egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),egui::Color32::WHITE);
-                if let Some(project)=self.project.as_mut() {
-                    let pause=self.editor.canvas(ui,&response,image_rect,project,state.as_ref().map_or(0.0, |s| s.position));
-                    if pause { self.act(|p|p.pause(true)); }
-                }
-            } else {
-                ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,"Your video appears here",
-                    egui::FontId::proportional(20.0),egui::Color32::GRAY);
-            }
-            if response.double_clicked() && self.editor.can_toggle_fullscreen() { self.toggle_fullscreen(); }
+            self.video_view(ui, size, false);
             ui.add_space(8.0);
             if let Some(s) = &state {
                 ui.add_enabled_ui(s.loaded, |ui| {
@@ -559,14 +599,9 @@ impl eframe::App for VideoApp {
                         }
                         ui.label(format!("{} / {}", timecode(s.position), timecode(s.duration)));
                     });
-                    let mut position = self.scrub.unwrap_or(s.position);
-                    ui.spacing_mut().slider_width = (ui.available_width()-150.0).max(100.0);
-                    let slider = ui.add(egui::Slider::new(&mut position,0.0..=s.duration.max(0.0)).text("seconds").fixed_decimals(3));
-                    if slider.changed() {
-                        self.scrub = Some(position);
-                        if !slider.dragged() { self.act(|p| p.seek(position)); self.scrub = None; }
+                    if let Some(position) = seek_slider(ui, &mut self.scrub, s.position, s.duration) {
+                        self.act(|p| p.seek(position));
                     }
-                    if slider.drag_stopped() { self.act(|p| p.seek(position)); self.scrub = None; }
                     ui.horizontal(|ui| {
                         if ui.checkbox(&mut self.muted,"Mute").changed() { let muted=self.muted; self.act(|p| p.mute(muted)); }
                         ui.spacing_mut().slider_width=120.0;
@@ -634,6 +669,57 @@ struct Loading {
     saved: Option<Project>,
 }
 
+fn paint_preview_annotations(
+    painter: &egui::Painter,
+    project: &Project,
+    rect: egui::Rect,
+    time: f64,
+) {
+    let painter = painter.with_clip_rect(rect);
+    for a in project
+        .annotations
+        .iter()
+        .filter(|a| a.visible_at(time, project.video.duration))
+    {
+        video_annotations::render::paint(
+            &painter,
+            a,
+            rect,
+            [project.video.width as f32, project.video.height as f32],
+        );
+    }
+}
+
+fn seek_slider(
+    ui: &mut egui::Ui,
+    scrub: &mut Option<f64>,
+    playback: f64,
+    duration: f64,
+) -> Option<f64> {
+    let mut position = scrub.unwrap_or(playback);
+    ui.spacing_mut().slider_width = (ui.available_width() - 150.0).max(100.0);
+    let slider = ui.add(
+        egui::Slider::new(&mut position, 0.0..=duration.max(0.0))
+            // Always clamping also rounds the externally updated clock and marks it
+            // changed on idle frames. Only user edits may produce seek commands.
+            .clamping(egui::SliderClamping::Edits)
+            .text("seconds")
+            .fixed_decimals(3),
+    );
+    if slider.changed() {
+        *scrub = Some(position);
+        if !slider.dragged() {
+            *scrub = None;
+            return Some(position);
+        }
+    }
+    if slider.drag_stopped() {
+        *scrub = None;
+        return Some(position);
+    }
+    None
+}
+
 fn timecode(seconds: f64) -> String {
     let millis = (seconds.max(0.0) * 1000.0).round() as u64;
     format!(
@@ -649,6 +735,160 @@ fn timecode(seconds: f64) -> String {
 mod tests {
     use super::*;
     use video_annotations::annotations::{Annotation, Kind};
+
+    fn input(events: Vec<egui::Event>) -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn playback_clock_does_not_seek_when_slider_is_untouched() {
+        let ctx = egui::Context::default();
+        let mut scrub = None;
+        // 24/30 fps clocks are not exact multiples of one millisecond.
+        for frame in 0..120 {
+            let mut output = ctx.run_ui(input(vec![]), |ui| {
+                assert_eq!(seek_slider(ui, &mut scrub, frame as f64 / 24.0, 5.0), None);
+                assert!(scrub.is_none());
+            });
+            output.textures_delta.clear();
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local libmpv and FFmpeg"]
+    fn live_playback_with_seek_slider_keeps_realtime_speed() {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("clock.mp4");
+        let ffmpeg = std::env::var_os("VIDEO_ANNOTATIONS_FFMPEG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("tools/ffmpeg/bin/ffmpeg.exe"));
+        let status = std::process::Command::new(ffmpeg)
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x180:rate=24:duration=4",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000:duration=4",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let mut player = Player::with_audio_output(Arc::new(|| {}), "null").unwrap();
+        player.load(&source).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            player.poll();
+            player.render([320, 180]).unwrap();
+            if player.state.loaded && player.state.duration > 0.0 && !player.state.seeking {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let ctx = egui::Context::default();
+        let mut scrub = None;
+        let start = Instant::now();
+        player.pause(false).unwrap();
+        while start.elapsed() < Duration::from_secs(2) {
+            player.poll();
+            player.render([320, 180]).unwrap();
+            let mut output = ctx.run_ui(input(vec![]), |ui| {
+                assert_eq!(
+                    seek_slider(ui, &mut scrub, player.state.position, player.state.duration),
+                    None,
+                    "UI must never seek in response to a playback clock update"
+                );
+            });
+            output.textures_delta.clear();
+            assert!(player.state.error.is_none());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!player.state.seeking);
+        let offset = player.state.position - start.elapsed().as_secs_f64();
+        assert!(offset.abs() < 0.25, "Playback clock offset: {offset}");
+        assert!(player.state.av_sync.is_some_and(|v| v.abs() < 0.15));
+    }
+
+    #[test]
+    fn seek_slider_still_accepts_pointer_input_and_commits_on_release() {
+        let ctx = egui::Context::default();
+        let mut scrub = None;
+        let mut seeks = Vec::new();
+        let pointer = egui::pos2(250.0, 10.0);
+        for events in [
+            vec![],
+            vec![
+                egui::Event::PointerMoved(pointer),
+                egui::Event::PointerButton {
+                    pos: pointer,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            vec![egui::Event::PointerButton {
+                pos: pointer,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        ] {
+            let mut output = ctx.run_ui(input(events), |ui| {
+                if let Some(time) = seek_slider(ui, &mut scrub, 0.0, 5.0) {
+                    seeks.push(time);
+                }
+            });
+            output.textures_delta.clear();
+        }
+        assert!(!seeks.is_empty());
+        assert!(seeks.iter().all(|t| *t > 1.0 && *t < 3.0));
+        assert!(scrub.is_none());
+    }
+
+    #[test]
+    fn fullscreen_video_fills_available_area_without_editor_handles() {
+        let mut app = app();
+        let ctx = app.context.clone();
+        app.editor.selected = Some(0);
+        app.texture = Some(ctx.load_texture(
+            "test",
+            egui::ColorImage::filled([16, 9], egui::Color32::BLACK),
+            Default::default(),
+        ));
+        let before = app.project.clone();
+        let mut output = ctx.run_ui(input(vec![]), |ui| {
+            let size = ui.available_size();
+            app.video_view(ui, size, true);
+            assert!(ui.min_rect().height() >= size.y);
+        });
+        // No light-blue editor rectangle or handles in viewing mode.
+        assert!(!output.shapes.iter().any(|s| match &s.shape {
+            egui::Shape::Rect(r) =>
+                r.stroke.color == egui::Color32::LIGHT_BLUE || r.fill == egui::Color32::LIGHT_BLUE,
+            _ => false,
+        }));
+        assert_eq!(app.project, before);
+        assert_eq!(app.editor.selected, Some(0));
+        output.textures_delta.clear();
+    }
 
     fn app() -> VideoApp {
         let mut project = Project::new(VideoInfo {

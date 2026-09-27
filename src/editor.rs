@@ -144,11 +144,14 @@ impl Editor {
                 ui.label("Sizes in video pixels");
             });
             if a.kind == Kind::Text {
-                ui.add(
+                ui.label("Text content");
+                let response = ui.add(
                     egui::TextEdit::multiline(&mut a.text)
+                        .id(egui::Id::new(("annotation-text", self.selected)))
                         .desired_rows(2)
                         .desired_width(ui.available_width()),
                 );
+                pause |= response.has_focus();
             }
         }
         ui.small(match self.tool {
@@ -409,6 +412,42 @@ fn paint(p: &egui::Painter, a: &Annotation, map: Mapping) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_editor_retains_focus_when_status_widgets_change() {
+        let ctx = egui::Context::default();
+        let mut project = project();
+        project.annotations[0].kind = Kind::Text;
+        project.annotations[0].text.clear();
+        let mut editor = Editor {
+            selected: Some(0),
+            ..Default::default()
+        };
+        let id = egui::Id::new(("annotation-text", Some(0_usize)));
+        for frame in 0..4 {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 600.0))),
+                events: if frame > 0 {
+                    vec![egui::Event::Text("a".into())]
+                } else {
+                    vec![]
+                },
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                for _ in 0..frame {
+                    ui.label("Variable playback status");
+                }
+                if frame == 0 {
+                    ctx.memory_mut(|m| m.request_focus(id));
+                }
+                assert!(editor.toolbar(ui, &mut project));
+            });
+            output.textures_delta.clear();
+            assert!(ctx.memory(|m| m.has_focus(id)));
+        }
+        assert_eq!(project.annotations[0].text, "aaa");
+    }
 
     fn project() -> Project {
         let mut project = Project::new(video_annotations::media::VideoInfo {
