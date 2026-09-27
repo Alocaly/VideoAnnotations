@@ -32,6 +32,22 @@ pub fn validate(project: &Project) -> Result<(), String> {
         return Err("Project exceeds 2000 annotations.".into());
     }
     for a in &project.annotations {
+        let e = &a.effects;
+        if !e.fade_in.is_finite()
+            || !e.fade_out.is_finite()
+            || !(0.0..=86400.0).contains(&e.fade_in)
+            || !(0.0..=86400.0).contains(&e.fade_out)
+            || !e.glow.is_finite()
+            || !(0.0..=30.0).contains(&e.glow)
+            || !e.outline_period.is_finite()
+            || !(0.0..=60.0).contains(&e.outline_period)
+            || (e.outline_period > 0.0 && e.outline_period < 0.1)
+            || e.movement.iter().any(|n| !n.is_finite())
+            || e.movement[0].abs() > v.width as f32
+            || e.movement[1].abs() > v.height as f32
+        {
+            return Err("Invalid annotation effects.".into());
+        }
         if !a.start_seconds.is_finite()
             || !a.end_seconds.is_finite()
             || a.start_seconds < 0.0
@@ -71,7 +87,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
     }
     let mut document: Document =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid project file: {e}"))?;
-    if document.version != 1 {
+    if !matches!(document.version, 1 | 2) {
         return Err(format!("Unsupported project version: {}", document.version));
     }
     validate(&document.project)?;
@@ -96,7 +112,7 @@ pub fn save(project: &Project, path: &Path) -> Result<(), String> {
     let mut stored = project.clone();
     stored.video.path = source.strip_prefix(parent).unwrap_or(&source).to_path_buf();
     let bytes = serde_json::to_vec_pretty(&Document {
-        version: 1,
+        version: 2,
         project: stored,
     })
     .map_err(|e| e.to_string())?;
@@ -207,6 +223,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test.vannot");
         let mut p = fixture(dir.path());
+        p.annotations[0].effects.fade_in = 1.5;
+        p.annotations[0].effects.fade_out = 0.5;
+        p.annotations[0].effects.glow = 10.0;
+        p.annotations[0].effects.movement = [100.0, -30.0];
+        p.annotations[1].effects.outline_period = 2.0;
         save(&p, &path).unwrap();
         assert_eq!(load(&path).unwrap(), p);
         let json: serde_json::Value =
@@ -216,6 +237,27 @@ mod tests {
         p.annotations[0].start_seconds = 1.0;
         save(&p, &path).unwrap();
         assert_eq!(load(&path).unwrap(), p);
+    }
+    #[test]
+    fn legacy_projects_load_with_effects_disabled_and_invalid_effects_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.vannot");
+        let mut p = fixture(dir.path());
+        let mut json = serde_json::to_value(Document {
+            version: 1,
+            project: p.clone(),
+        })
+        .unwrap();
+        for a in json["project"]["annotations"].as_array_mut().unwrap() {
+            a.as_object_mut().unwrap().remove("effects");
+        }
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(load(&path).unwrap(), p);
+        p.annotations[0].effects.glow = f32::NAN;
+        assert!(validate(&p).is_err());
+        p.annotations[0].effects.glow = 0.0;
+        p.annotations[0].effects.fade_in = -1.0;
+        assert!(validate(&p).is_err());
     }
     #[test]
     fn moved_project_resolves_relative_source_from_new_location() {

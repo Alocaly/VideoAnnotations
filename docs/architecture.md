@@ -35,8 +35,8 @@ are not validated in this milestone.
 - `src/annotations.rs`: video-coordinate shape data, hit testing, bounded translation.
 - `src/editor.rs`: annotation tools, selection, gestures, style controls, preview overlay (step 3).
 - `src/timeline.rs`: annotation tracks, temporal controls, creation and stacking controls (step 4); returns pause/seek actions to the player UI.
-- `src/render.rs`: shared annotation painter and offline egui mesh rasterizer (step 6).
-- `src/export.rs`: cancellable background MP4 encoding, progress, and atomic destination replacement (step 6).
+- `src/render.rs`: shared time-based annotation/effect painter and offline egui mesh rasterizer (steps 6–7).
+- `src/export.rs`: cancellable background MP4/GIF encoding, sampled animation overlays, progress, and atomic destination replacement (steps 6–7).
 
 The worker serializes decoding and discards queued obsolete requests before the
 next decode. Each result carries a request ID; the UI ignores obsolete results,

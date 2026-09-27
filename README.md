@@ -14,7 +14,7 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Steps 1 through 6 are implemented. The English-language native player opens a video,
+Steps 1 through 7 are implemented. The English-language native player opens a video,
 plays it with synchronized audio, pauses, seeks, steps one frame in either
 direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
@@ -29,6 +29,8 @@ Projects can be saved and reopened as `.vannot` files, with source-video relinki
 when the original path is missing. Annotation edits support undo and redo.
 Export MP4 burns the annotations into a new H.264 video with AAC source audio,
 progress reporting, and cancellation.
+Annotations support fades, linear movement, glow, and a traveling outline.
+GIF export includes maximum-width and frame-rate controls.
 
 The initial target is Windows. The UI uses egui/eframe; persistent playback uses
 libmpv, with FFmpeg internally. The step-1 FFmpeg/ffprobe extraction backend is
@@ -106,7 +108,8 @@ then uploads the result to an egui texture. Hardware video decoding and HDR colo
 management are not yet validated. Backward frame stepping may be slower on long
 GOP videos. The position follows the playback engine; step commands follow actual
 frames, including tested variable-frame-rate media. Export currently supports
-SDR MP4 only, up to 32 annotations and 9 megapixels; HDR tone mapping is not implemented.
+SDR MP4 and GIF, up to 32 annotations and 9 megapixels; HDR tone mapping is not implemented.
+Animated export uses temporary PNG frames (maximum 18000 frames and 2 GiB).
 Projects reference the source video rather than embedding it; keep the video
 alongside your project. There is no autosave or crash recovery yet. Opening
 another video/project or closing the window offers Save, Discard, and Cancel
@@ -184,6 +187,28 @@ field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo butto
 for project history. Playback, selection, file operations, and source relinking
 are not undoable, and history is not stored in the project file.
 
+Projects now save as format version 2, including effects. Version 1 projects still
+open with effects disabled. Older app versions cannot open newly saved version 2
+projects; keep a copy if you need to use an older executable.
+
+## Annotation effects
+
+Select an annotation, then expand **Effects** below its style controls:
+
+- **Fade in / Fade out**: seconds from the start / before the end. Zero disables
+  that fade. Overlapping fades use the lower opacity, so short annotations may
+  never become fully opaque.
+- **Move by X / Y**: total linear displacement in video pixels over the annotation
+  lifetime. The stored box is the starting position; movement beyond the video
+  is clipped. Seeking evaluates the same effect as continuous playback.
+- **Glow**: layered halo radius, 0–30 video pixels; zero disables it.
+- **Traveling outline** (rectangles/ellipses): a bright quarter-contour segment
+  over a dim outline, with seconds per revolution (0.1–60).
+
+Effects compose and are included in save, undo/redo, fullscreen, MP4, and GIF.
+An annotation with fade-in is invisible at its exact start; move the playhead
+forward to see it. Its selection handles remain available when paused.
+
 ## Annotated MP4 export
 
 Choose Export MP4, then a destination different from the source video. The current
@@ -198,8 +223,18 @@ re-encoded to AAC at 192 kb/s when present. Silent videos remain silent. Annotat
 timing and layer order match the preview. Video display dimensions are preserved,
 with at most one padding pixel on the right/bottom for even MP4 dimensions. Source
 frame timestamps are retained without forcing a constant frame rate. Subtitles,
-additional audio tracks, and source metadata are not copied. GIF and effects are
-planned for step 7; output quality/size controls and packaging remain future work.
+additional audio tracks, and source metadata are not copied. Animated overlays are
+sampled at 60 fps while the source video's frame timestamps remain variable.
+MP4 quality/size controls and packaging remain future work.
+
+## Animated GIF export
+
+Set **GIF max width** (64–1920 px, no upscaling) and **Frame rate** (1–30 fps), then
+choose **Export GIF**. Height follows the source aspect ratio. GIF has no audio
+and loops forever. It uses a global palette built in a separate pass and dithering;
+GIF color and centisecond timing limits can cause banding or rounded durations.
+Effects are sampled at the selected GIF frame rate. Export progress, cancellation,
+source protection, and safe destination replacement also apply to GIF.
 
 See [architecture decisions](docs/architecture.md) and the
 [step 1 validation report](docs/step-1-validation.md), and
@@ -207,4 +242,5 @@ See [architecture decisions](docs/architecture.md) and the
 [step 3 annotation design and validation](docs/step-3-annotations.md), and
 [step 4 timeline design and validation](docs/step-4-timeline.md), and
 [step 5 persistence design and validation](docs/step-5-persistence.md), and
-[step 6 export design and validation](docs/step-6-export.md).
+[step 6 export design and validation](docs/step-6-export.md), and
+[step 7 effects and GIF design and validation](docs/step-7-effects-gif.md).

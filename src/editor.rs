@@ -153,6 +153,75 @@ impl Editor {
                 );
                 pause |= response.has_focus();
             }
+            egui::CollapsingHeader::new("Effects")
+                .id_salt(("effects", self.selected))
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Fade in");
+                        pause |= ui
+                            .add(
+                                egui::DragValue::new(&mut a.effects.fade_in)
+                                    .range(0.0..=86400.0)
+                                    .speed(0.05)
+                                    .suffix(" s"),
+                            )
+                            .changed();
+                        ui.label("Fade out");
+                        pause |= ui
+                            .add(
+                                egui::DragValue::new(&mut a.effects.fade_out)
+                                    .range(0.0..=86400.0)
+                                    .speed(0.05)
+                                    .suffix(" s"),
+                            )
+                            .changed();
+                        ui.label("Glow");
+                        pause |= ui
+                            .add(
+                                egui::DragValue::new(&mut a.effects.glow)
+                                    .range(0.0..=30.0)
+                                    .speed(0.5)
+                                    .suffix(" px"),
+                            )
+                            .changed();
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Move by X / Y");
+                        for (axis, limit) in [project.video.width, project.video.height]
+                            .into_iter()
+                            .enumerate()
+                        {
+                            pause |= ui
+                                .add(
+                                    egui::DragValue::new(&mut a.effects.movement[axis])
+                                        .range(-(limit as f32)..=limit as f32)
+                                        .speed(1.0)
+                                        .suffix(" px"),
+                                )
+                                .changed();
+                        }
+                        ui.small("Linear motion over the annotation lifetime; edges are clipped.");
+                    });
+                    if matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
+                        ui.horizontal(|ui| {
+                            let mut enabled = a.effects.outline_period > 0.0;
+                            if ui.checkbox(&mut enabled, "Traveling outline").changed() {
+                                a.effects.outline_period = if enabled { 2.0 } else { 0.0 };
+                                pause = true;
+                            }
+                            if enabled {
+                                pause |= ui
+                                    .add(
+                                        egui::DragValue::new(&mut a.effects.outline_period)
+                                            .range(0.1..=60.0)
+                                            .speed(0.1)
+                                            .suffix(" s / turn"),
+                                    )
+                                    .changed();
+                            }
+                        });
+                    }
+                });
         }
         ui.small(match self.tool {
             Some(Kind::Text)=>"Click the video to add text. Edit its content below the tools.",
@@ -237,7 +306,7 @@ impl Editor {
                         .get(index)
                         .filter(|a| a.visible_at(time, project.video.duration))
                         .and_then(|a| {
-                            handles(a)
+                            handles(&a.evaluated(time))
                                 .iter()
                                 .position(|p| map.screen(*p).distance(origin) <= 9.0)
                                 .map(|h| (index, h))
@@ -314,6 +383,15 @@ impl Editor {
                     handle,
                 } => {
                     let mut a = original.clone();
+                    let evaluated = original.evaluated(time);
+                    let p = [
+                        p[0] - (evaluated.a[0] - original.a[0]),
+                        p[1] - (evaluated.a[1] - original.a[1]),
+                    ];
+                    let p = [
+                        p[0].clamp(0.0, map.extent[0]),
+                        p[1].clamp(0.0, map.extent[1]),
+                    ];
                     if a.kind == Kind::Arrow {
                         if *handle == 0 {
                             a.a = p;
@@ -355,13 +433,14 @@ impl Editor {
             .iter()
             .filter(|a| a.visible_at(time, project.video.duration))
         {
-            paint(&painter, a, map);
+            video_annotations::render::paint_at(&painter, a, map.rect, map.extent, time);
         }
         if let Some(a) = self
             .selected
             .and_then(|i| project.annotations.get(i))
             .filter(|a| a.visible_at(time, project.video.duration))
         {
+            let a = &a.evaluated(time);
             let (min, max) = a.bounds();
             painter.rect_stroke(
                 Rect::from_two_pos(map.screen(min), map.screen(max)),
@@ -385,10 +464,9 @@ impl Editor {
 }
 
 fn pick(project: &Project, p: [f32; 2], tolerance: f32, time: f64) -> Option<usize> {
-    project
-        .annotations
-        .iter()
-        .rposition(|a| a.visible_at(time, project.video.duration) && a.hit(p, tolerance))
+    project.annotations.iter().rposition(|a| {
+        a.visible_at(time, project.video.duration) && a.evaluated(time).hit(p, tolerance)
+    })
 }
 fn handles(a: &Annotation) -> Vec<[f32; 2]> {
     if a.kind == Kind::Arrow {
@@ -404,9 +482,6 @@ fn valid(a: &Annotation, scale: f32) -> bool {
     } else {
         (max[0] - min[0]) * scale >= 3.0 && (max[1] - min[1]) * scale >= 3.0
     }
-}
-fn paint(p: &egui::Painter, a: &Annotation, map: Mapping) {
-    video_annotations::render::paint(p, a, map.rect, map.extent);
 }
 
 #[cfg(test)]
@@ -480,6 +555,16 @@ mod tests {
         assert_eq!(editor.selected, None);
         editor.delete(&mut project);
         assert_eq!(project.annotations.len(), 1);
+    }
+
+    #[test]
+    fn picking_follows_animated_displacement() {
+        let mut project = project();
+        project.annotations[0].effects.movement = [200.0, 0.0];
+        assert_eq!(pick(&project, [50.0, 50.0], 0.0, 0.0), Some(0));
+        assert_eq!(pick(&project, [50.0, 50.0], 0.0, 5.0), None);
+        assert_eq!(pick(&project, [150.0, 50.0], 0.0, 5.0), Some(0));
+        assert_eq!(project.annotations[0].a, [10.0, 10.0]);
     }
 
     #[test]

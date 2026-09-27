@@ -30,9 +30,53 @@ pub struct Annotation {
     pub color: [u8; 4],
     pub thickness: f32,
     pub font_size: f32,
+    #[serde(default)]
+    pub effects: Effects,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Effects {
+    pub fade_in: f64,
+    pub fade_out: f64,
+    /// Linear displacement from the stored geometry over the active interval.
+    pub movement: [f32; 2],
+    pub glow: f32,
+    /// Zero disables the traveling outline; otherwise seconds per revolution.
+    pub outline_period: f64,
 }
 
 impl Annotation {
+    pub fn animated(&self) -> bool {
+        self.effects.fade_in > 0.0
+            || self.effects.fade_out > 0.0
+            || self.effects.movement != [0.0; 2]
+            || self.effects.outline_period > 0.0
+    }
+
+    /// Pure evaluation: seeking and exporting never change the saved geometry.
+    pub fn evaluated(&self, time: f64) -> Self {
+        let mut a = self.clone();
+        let lifetime = (self.end_seconds - self.start_seconds).max(f64::EPSILON);
+        let elapsed = (time - self.start_seconds).clamp(0.0, lifetime);
+        let progress = (elapsed / lifetime) as f32;
+        for axis in 0..2 {
+            a.a[axis] += self.effects.movement[axis] * progress;
+            a.b[axis] += self.effects.movement[axis] * progress;
+        }
+        let fade_in = if self.effects.fade_in > 0.0 {
+            (elapsed / self.effects.fade_in).min(1.0)
+        } else {
+            1.0
+        };
+        let fade_out = if self.effects.fade_out > 0.0 {
+            ((lifetime - elapsed) / self.effects.fade_out).min(1.0)
+        } else {
+            1.0
+        };
+        a.color[3] = (self.color[3] as f64 * fade_in.min(fade_out)).round() as u8;
+        a
+    }
     /// Half-open intervals, except the final video endpoint remains visible.
     pub fn visible_at(&self, time: f64, duration: f64) -> bool {
         time.is_finite()
@@ -81,6 +125,7 @@ impl Annotation {
             color: [255, 210, 60, 255],
             thickness: 4.0,
             font_size: 36.0,
+            effects: Effects::default(),
         }
     }
     pub fn bounds(&self) -> ([f32; 2], [f32; 2]) {
@@ -132,6 +177,24 @@ fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn effects_evaluate_deterministically_without_mutating_geometry() {
+        let mut a = Annotation::new(Kind::Text, [10.0, 20.0], [50.0, 60.0], 4.0);
+        a.start_seconds = 1.0;
+        a.effects.fade_in = 1.0;
+        a.effects.fade_out = 1.0;
+        a.effects.movement = [60.0, -12.0];
+        assert_eq!(a.evaluated(1.0).color[3], 0);
+        assert_eq!(a.evaluated(1.5).color[3], 128);
+        assert_eq!(a.evaluated(2.5).a, [40.0, 14.0]);
+        assert_eq!(a.evaluated(2.5).color[3], 255);
+        assert_eq!(a.evaluated(3.5).color[3], 128);
+        assert_eq!(a.evaluated(4.0).color[3], 0);
+        assert_eq!(a.a, [10.0, 20.0]);
+        a.effects.fade_in = 6.0;
+        a.effects.fade_out = 6.0;
+        assert_eq!(a.evaluated(2.5).color[3], 64);
+    }
     #[test]
     fn intervals_use_start_inclusive_end_exclusive_and_include_video_end() {
         let mut a = Annotation::new(Kind::Text, [0.0; 2], [10.0; 2], 10.0).at_playhead(2.0, 10.0);

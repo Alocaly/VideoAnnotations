@@ -8,6 +8,8 @@ use video_annotations::{
 };
 
 pub struct VideoApp {
+    gif_width: u32,
+    gif_fps: u32,
     export: Option<video_annotations::export::Job>,
     export_progress: f32,
     export_message: Option<String>,
@@ -34,6 +36,8 @@ impl VideoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Option<PathBuf>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         let mut app = Self {
+            gif_width: 640,
+            gif_fps: 15,
             export: None,
             export_progress: 0.0,
             export_message: None,
@@ -76,20 +80,27 @@ impl VideoApp {
             .is_some_and(|p| self.saved.as_ref() != Some(p))
     }
 
-    fn start_export(&mut self) {
+    fn start_export(&mut self, format: video_annotations::export::Format) {
         self.act(|p| p.pause(true));
         let Some(project) = &self.project else {
             return;
         };
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Export annotated MP4")
-            .add_filter("MP4 video", &["mp4"])
-            .set_file_name("annotated.mp4")
+            .set_title(format!(
+                "Export annotated {}",
+                format.extension().to_uppercase()
+            ))
+            .add_filter(format.extension().to_uppercase(), &[format.extension()])
+            .set_file_name(format!("annotated.{}", format.extension()))
             .save_file()
         else {
             return;
         };
-        self.export = Some(video_annotations::export::Job::start(project.clone(), path));
+        self.export = Some(video_annotations::export::Job::start_with_format(
+            project.clone(),
+            path,
+            format,
+        ));
         self.export_progress = 0.0;
         self.export_message = Some("Preparing export…".into());
         self.error = None;
@@ -553,10 +564,20 @@ impl eframe::App for VideoApp {
                 if ui.button("Open project...").on_hover_text("Ctrl+Shift+O").clicked() { self.project_picker(); }
                 if ui.add_enabled(self.project.is_some(),egui::Button::new("Save")).on_hover_text("Ctrl+S").clicked() { self.save(false); }
                 if ui.add_enabled(self.project.is_some(),egui::Button::new("Save as...")).on_hover_text("Ctrl+Shift+S").clicked() { self.save(true); }
-                if ui.add_enabled(self.project.is_some(),egui::Button::new("Export MP4...")).on_hover_text("H.264 / AAC, SDR; up to 32 annotations and 9 megapixels").clicked() { self.start_export(); }
+                if ui.add_enabled(self.project.is_some(),egui::Button::new("Export MP4...")).on_hover_text("H.264 / AAC, SDR; up to 32 annotations and 9 megapixels").clicked() { self.start_export(video_annotations::export::Format::Mp4); }
                 if ui.add_enabled(self.history.can_undo(),egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.restore_history(false); }
                 if ui.add_enabled(self.history.can_redo(),egui::Button::new("Redo")).on_hover_text("Ctrl+Y / Ctrl+Shift+Z").clicked() { self.restore_history(true); }
                 if ui.button(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }).on_hover_text("F11 / Esc").clicked() { self.toggle_fullscreen(); }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(self.project.is_some(), egui::Button::new("Export GIF...")).clicked() {
+                    self.start_export(video_annotations::export::Format::Gif { width: self.gif_width, fps: self.gif_fps });
+                }
+                ui.label("GIF max width");
+                ui.add(egui::DragValue::new(&mut self.gif_width).range(64..=1920).suffix(" px"));
+                ui.label("Frame rate");
+                ui.add(egui::DragValue::new(&mut self.gif_fps).range(1..=30).suffix(" fps"));
+                ui.small("No audio • loops forever");
             });
             if self.project.is_some() {
                 ui.label(format!("{}{}", self.project_path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy()).unwrap_or_else(|| "Untitled project".into()), if self.dirty() { " * (unsaved changes)" } else { " (saved)" }));
@@ -681,11 +702,12 @@ fn paint_preview_annotations(
         .iter()
         .filter(|a| a.visible_at(time, project.video.duration))
     {
-        video_annotations::render::paint(
+        video_annotations::render::paint_at(
             &painter,
             a,
             rect,
             [project.video.width as f32, project.video.height as f32],
+            time,
         );
     }
 }
@@ -905,6 +927,8 @@ mod tests {
             5.0,
         ));
         VideoApp {
+            gif_width: 640,
+            gif_fps: 15,
             export: None,
             export_progress: 0.0,
             export_message: None,

@@ -3,6 +3,88 @@ use crate::annotations::{Annotation, Kind};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Time-based rendering shared by the editor, fullscreen, MP4 and GIF export.
+pub fn paint_at(
+    p: &egui::Painter,
+    source: &Annotation,
+    viewport: Rect,
+    extent: [f32; 2],
+    time: f64,
+) {
+    let a = source.evaluated(time);
+    if a.color[3] == 0 {
+        return;
+    }
+    if a.effects.glow > 0.0 {
+        for ring in (1..=3).rev() {
+            let mut halo = a.clone();
+            halo.color[3] = (a.color[3] as f32 * 0.10) as u8;
+            if a.kind == Kind::Text {
+                for direction in 0..8 {
+                    let angle = direction as f32 * std::f32::consts::TAU / 8.0;
+                    let d =
+                        egui::vec2(angle.cos(), angle.sin()) * a.effects.glow * ring as f32 / 3.0;
+                    let mut shadow = halo.clone();
+                    for point in [&mut shadow.a, &mut shadow.b] {
+                        point[0] += d.x;
+                        point[1] += d.y;
+                    }
+                    paint(p, &shadow, viewport, extent);
+                }
+            } else {
+                halo.thickness += a.effects.glow * ring as f32 * 2.0 / 3.0;
+                paint(p, &halo, viewport, extent);
+            }
+        }
+    }
+    if a.effects.outline_period > 0.0 && matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
+        let mut dim = a.clone();
+        dim.color[3] = (a.color[3] as f32 * 0.25) as u8;
+        paint(p, &dim, viewport, extent);
+        let phase = ((time - a.start_seconds).max(0.0) / a.effects.outline_period).fract() as f32;
+        let (min, max) = a.bounds();
+        let points = (0..=64)
+            .map(|i| {
+                let t = (phase + i as f32 / 256.0).fract();
+                let point = if a.kind == Kind::Ellipse {
+                    let angle = t * std::f32::consts::TAU;
+                    [
+                        (min[0] + max[0]) * 0.5 + angle.cos() * (max[0] - min[0]) * 0.5,
+                        (min[1] + max[1]) * 0.5 + angle.sin() * (max[1] - min[1]) * 0.5,
+                    ]
+                } else {
+                    let w = max[0] - min[0];
+                    let h = max[1] - min[1];
+                    let d = t * 2.0 * (w + h);
+                    if d < w {
+                        [min[0] + d, min[1]]
+                    } else if d < w + h {
+                        [max[0], min[1] + d - w]
+                    } else if d < 2.0 * w + h {
+                        [max[0] - (d - w - h), max[1]]
+                    } else {
+                        [min[0], max[1] - (d - 2.0 * w - h)]
+                    }
+                };
+                viewport.min
+                    + Vec2::new(
+                        point[0] / extent[0] * viewport.width(),
+                        point[1] / extent[1] * viewport.height(),
+                    )
+            })
+            .collect();
+        p.add(egui::Shape::line(
+            points,
+            Stroke::new(
+                a.thickness * viewport.width() / extent[0],
+                Color32::from_rgba_unmultiplied(a.color[0], a.color[1], a.color[2], a.color[3]),
+            ),
+        ));
+    } else {
+        paint(p, &a, viewport, extent);
+    }
+}
+
 pub fn paint(p: &egui::Painter, a: &Annotation, viewport: Rect, extent: [f32; 2]) {
     let scale = viewport.width() / extent[0];
     let screen = |point: [f32; 2]| {
@@ -59,6 +141,22 @@ pub fn rasterize(
     size: [u32; 2],
     cancel: &AtomicBool,
 ) -> Result<image::RgbaImage, String> {
+    rasterize_scene(
+        std::slice::from_ref(a),
+        size,
+        a.start_seconds,
+        a.end_seconds,
+        cancel,
+    )
+}
+
+pub fn rasterize_scene(
+    annotations: &[Annotation],
+    size: [u32; 2],
+    time: f64,
+    duration: f64,
+    cancel: &AtomicBool,
+) -> Result<image::RgbaImage, String> {
     let [width, height] = size;
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 9_000_000 {
         return Err("Export supports up to 9 megapixels.".into());
@@ -70,12 +168,15 @@ pub fn rasterize(
         ..Default::default()
     };
     let mut output = ctx.run_ui(input, |ui| {
-        paint(
-            &ui.painter().with_clip_rect(rect),
-            a,
-            rect,
-            [width as f32, height as f32],
-        )
+        for a in annotations.iter().filter(|a| a.visible_at(time, duration)) {
+            paint_at(
+                &ui.painter().with_clip_rect(rect),
+                a,
+                rect,
+                [width as f32, height as f32],
+                time,
+            );
+        }
     });
     let deltas = output
         .textures_delta
@@ -238,6 +339,33 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn animated_scene_handles_empty_frames_movement_fades_glow_and_outline() {
+        let cancel = AtomicBool::new(false);
+        assert!(
+            rasterize_scene(&[], [160, 100], 0.0, 2.0, &cancel)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+        let mut a = Annotation::new(Kind::Rectangle, [20.0, 20.0], [80.0, 70.0], 2.0);
+        a.effects.fade_in = 1.0;
+        a.effects.movement = [40.0, 0.0];
+        let first = rasterize_scene(&[a.clone()], [160, 100], 0.0, 2.0, &cancel).unwrap();
+        assert!(first.pixels().all(|p| p[3] == 0));
+        let middle = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
+        assert_eq!(middle.get_pixel(50, 21)[3], 255);
+        assert_eq!(middle.get_pixel(25, 21)[3], 0);
+        a.effects.glow = 12.0;
+        let halo = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
+        assert!(halo.get_pixel(60, 30)[3] > middle.get_pixel(60, 30)[3]);
+        a.effects = Default::default();
+        a.effects.outline_period = 1.0;
+        assert_ne!(
+            rasterize_scene(&[a.clone()], [160, 100], 0.0, 2.0, &cancel).unwrap(),
+            rasterize_scene(&[a], [160, 100], 0.5, 2.0, &cancel).unwrap()
+        );
+    }
     #[test]
     fn all_shapes_render_and_respect_transparency_and_text_clipping() {
         let cancel = AtomicBool::new(false);

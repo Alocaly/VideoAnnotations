@@ -52,6 +52,9 @@ fn fixture(path: &Path, audio: bool) -> Project {
     Project::new(MediaBackend::default().probe(path).unwrap())
 }
 fn pixel(path: &Path, time: f64, x: usize, y: usize) -> [u8; 3] {
+    pixel_with_width(path, time, x, y, 160)
+}
+fn pixel_with_width(path: &Path, time: f64, x: usize, y: usize, width: usize) -> [u8; 3] {
     let output = Command::new(tool("ffmpeg"))
         .args(["-v", "error", "-ss", &time.to_string(), "-i"])
         .arg(path)
@@ -67,7 +70,7 @@ fn pixel(path: &Path, time: f64, x: usize, y: usize) -> [u8; 3] {
         .output()
         .unwrap();
     assert!(output.status.success());
-    let offset = (y * 160 + x) * 3;
+    let offset = (y * width + x) * 3;
     output.stdout[offset..offset + 3].try_into().unwrap()
 }
 #[test]
@@ -222,6 +225,13 @@ fn preserves_variable_timestamps_and_rejects_failed_encoding_without_overwrite()
     for (a, b) in input_times.iter().zip(output_times) {
         assert!((a - b).abs() < 0.001, "{a} vs {b}");
     }
+    project.annotations[0].effects.fade_in = 0.4;
+    export::export(&project, &out, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let animated_times = timestamps(&out);
+    assert_eq!(input_times.len(), animated_times.len());
+    for (a, b) in input_times.iter().zip(animated_times) {
+        assert!((a - b).abs() < 0.001, "animated: {a} vs {b}");
+    }
     let before = std::fs::read(&out).unwrap();
     let broken = dir.path().join("broken.mp4");
     std::fs::write(&broken, b"not media").unwrap();
@@ -232,4 +242,119 @@ fn preserves_variable_timestamps_and_rejects_failed_encoding_without_overwrite()
             .contains("FFmpeg export failed")
     );
     assert_eq!(std::fs::read(out).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
+fn animated_mp4_and_gif_respect_effects_size_rate_and_cancellation() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.mp4");
+    let mut project = fixture(&source, true);
+    let mut a = Annotation::new(Kind::Rectangle, [10.0, 20.0], [40.0, 70.0], 2.0);
+    a.color = [255, 0, 0, 255];
+    a.thickness = 10.0;
+    a.effects.fade_in = 1.0;
+    a.effects.fade_out = 0.5;
+    a.effects.movement = [80.0, 0.0];
+    project.annotations.push(a);
+    let mp4 = dir.path().join("animated.mp4");
+    export::export(&project, &mp4, &AtomicBool::new(false), |_, _| {}).unwrap();
+    assert!(pixel(&mp4, 0.0, 25, 24)[0] < 15);
+    let faded = pixel(&mp4, 0.5, 45, 24)[0];
+    assert!((80..180).contains(&faded), "{faded}");
+    assert!(pixel(&mp4, 1.2, 75, 24)[0] > 180);
+    assert!(pixel(&mp4, 1.2, 25, 24)[0] < 15);
+    let gif = dir.path().join("animated é.gif");
+    let format = export::Format::Gif { width: 80, fps: 10 };
+    assert_eq!(project.video.duration, 2.0, "Unexpected fixture duration");
+    export::export_with_format(&project, &gif, format, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let probe = Command::new(tool("ffprobe"))
+        .args([
+            "-v",
+            "error",
+            "-count_frames",
+            "-show_streams",
+            "-of",
+            "json",
+        ])
+        .arg(&gif)
+        .output()
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+    let streams = json["streams"].as_array().unwrap();
+    assert_eq!(streams.len(), 1);
+    assert_eq!(streams[0]["codec_name"], "gif");
+    assert_eq!(streams[0]["width"], 80);
+    assert_eq!(streams[0]["height"], 50);
+    assert_eq!(streams[0]["nb_read_frames"], "20", "{json}");
+    assert_eq!(streams[0]["r_frame_rate"], "10/1");
+    let last_red = pixel_with_width(&gif, 1.9, 50, 12, 80)[0];
+    assert!(
+        (20..80).contains(&last_red),
+        "Last GIF frame should show the final fade sample, got {last_red}"
+    );
+    let before = std::fs::read(&gif).unwrap();
+    let cancel = AtomicBool::new(false);
+    assert!(
+        export::export_with_format(&project, &gif, format, &cancel, |_, message| {
+            if message.starts_with("Rendering animation 2/") {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        })
+        .unwrap_err()
+        .contains("canceled")
+    );
+    assert_eq!(std::fs::read(&gif).unwrap(), before);
+    assert!(
+        export::export_with_format(
+            &project,
+            &gif,
+            export::Format::Gif { width: 0, fps: 0 },
+            &AtomicBool::new(false),
+            |_, _| {}
+        )
+        .is_err()
+    );
+    assert!(
+        export::export_with_format(
+            &project,
+            &source,
+            format,
+            &AtomicBool::new(false),
+            |_, _| {}
+        )
+        .is_err()
+    );
+    project.video.duration = 400.0;
+    assert!(
+        export::export(&project, &mp4, &AtomicBool::new(false), |_, _| {})
+            .unwrap_err()
+            .contains("18000")
+    );
+    assert_eq!(std::fs::read(&gif).unwrap(), before);
+}
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
+fn static_gif_without_annotations_and_palette_cancellation() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = fixture(&dir.path().join("silent.mp4"), false);
+    let out = dir.path().join("silent.gif");
+    let format = export::Format::Gif { width: 80, fps: 8 };
+    export::export_with_format(&project, &out, format, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let times = timestamps(&out);
+    assert_eq!(times.len(), 16);
+    assert!((times[15] - 1.875).abs() < 0.015);
+    let original = std::fs::read(&out).unwrap();
+    let cancel = AtomicBool::new(false);
+    assert!(
+        export::export_with_format(&project, &out, format, &cancel, |_, message| {
+            if message.starts_with("Building GIF palette") {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        })
+        .unwrap_err()
+        .contains("canceled")
+    );
+    assert_eq!(std::fs::read(&out).unwrap(), original);
 }
