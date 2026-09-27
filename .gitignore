@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/dist/
 /tools/ffmpeg/
 /tools/mpv/
 /tools/downloads/

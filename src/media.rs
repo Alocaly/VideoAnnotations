@@ -58,31 +58,18 @@ impl Default for MediaBackend {
     }
 }
 
-pub(crate) fn executable(name: &str) -> PathBuf {
+pub fn executable(name: &str) -> PathBuf {
     let variable = format!("VIDEO_ANNOTATIONS_{}", name.to_uppercase());
-    if let Some(path) = std::env::var_os(variable) {
-        return path.into();
-    }
     let filename = if cfg!(windows) {
         format!("{name}.exe")
     } else {
         name.into()
     };
-    let mut roots = Vec::new();
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        // Supports running target/debug/*.exe from Explorer as well as cargo run.
-        roots.extend(exe.ancestors().skip(1).take(3).map(Path::to_path_buf));
-    }
-    for root in roots {
-        let local = root.join("tools/ffmpeg/bin").join(&filename);
-        if local.is_file() {
-            return local;
-        }
-    }
-    filename.into()
+    crate::runtime::resolve(
+        &variable,
+        &Path::new("tools/ffmpeg/bin").join(&filename),
+        &filename,
+    )
 }
 
 impl MediaBackend {

@@ -122,10 +122,7 @@ impl Api {
     }
 }
 
-fn library_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("VIDEO_ANNOTATIONS_MPV") {
-        return path.into();
-    }
+pub fn library_path() -> PathBuf {
     let filename = if cfg!(windows) {
         "libmpv-2.dll"
     } else if cfg!(target_os = "macos") {
@@ -133,17 +130,11 @@ fn library_path() -> PathBuf {
     } else {
         "libmpv.so.2"
     };
-    let mut roots = std::env::current_dir().into_iter().collect::<Vec<_>>();
-    if let Ok(exe) = std::env::current_exe() {
-        roots.extend(exe.ancestors().skip(1).take(4).map(Path::to_path_buf));
-    }
-    for root in roots {
-        let path = root.join("tools/mpv").join(filename);
-        if path.is_file() {
-            return path;
-        }
-    }
-    filename.into()
+    crate::runtime::resolve(
+        "VIDEO_ANNOTATIONS_MPV",
+        &Path::new("tools/mpv").join(filename),
+        filename,
+    )
 }
 
 struct Notify {
@@ -207,6 +198,8 @@ pub struct Player {
     notify: Box<Notify>,
     pixels: Vec<u32>, // At least 4-byte aligned, as required by rgb0.
     size: [usize; 2],
+    display_size: [u32; 2],
+    rotation: Option<f64>,
     pub state: PlaybackState,
 }
 
@@ -240,6 +233,8 @@ impl Player {
             }),
             pixels: Vec::new(),
             size: [0, 0],
+            display_size: [0, 0],
+            rotation: None,
             state: PlaybackState::default(),
         };
         for (name, value) in [
@@ -252,6 +247,9 @@ impl Player {
             ("pause", "yes"),
             ("video-sync", "audio"),
             ("hwdec", "no"),
+            // The libmpv software renderer does not rotate pixels itself.
+            // Render unrotated, then apply display metadata to the RGB buffer.
+            ("video-rotate", "no"),
             ("osd-level", "0"),
             ("audio-display", "no"),
             ("sub-auto", "no"),
@@ -308,6 +306,7 @@ impl Player {
             (9, "audio-params/samplerate", 5),
             (10, "current-ao", 1),
             (11, "avsync", 5),
+            (12, "video-dec-params/rotate", 5),
         ] {
             let name = CString::new(name).unwrap();
             // SAFETY: libmpv copies the name, event formats decoded in poll().
@@ -348,7 +347,14 @@ impl Player {
             .strip_prefix(r"\\?\UNC\")
             .map(|p| format!(r"\\{p}"))
             .unwrap_or_else(|| path.strip_prefix(r"\\?\").unwrap_or(path).to_owned());
-        self.command(&["loadfile", &path, "replace"])
+        self.command(&["loadfile", &path, "replace"])?;
+        // Observed properties need not emit again when the next file has the
+        // same value. Keep their cache, but do not present the old file as loaded.
+        self.state.loaded = false;
+        self.state.ended = false;
+        self.state.position = 0.0;
+        self.state.error = None;
+        Ok(())
     }
     pub fn pause(&self, paused: bool) -> Result<(), String> {
         self.command(&["set", "pause", if paused { "yes" } else { "no" }])
@@ -433,8 +439,8 @@ impl Player {
                             // retain the UI state until an explicit seek/step.
                             4 => self.state.ended |= flag,
                             5 => self.state.seeking = flag,
-                            6 => self.state.width = number.unwrap_or(0.0) as u32,
-                            7 => self.state.height = number.unwrap_or(0.0) as u32,
+                            6 => self.display_size[0] = number.unwrap_or(0.0) as u32,
+                            7 => self.display_size[1] = number.unwrap_or(0.0) as u32,
                             8 => self.state.fps = number.filter(|v| *v > 0.0),
                             9 => self.state.audio_rate = number,
                             10 => {
@@ -452,6 +458,7 @@ impl Player {
                                 };
                             }
                             11 => self.state.av_sync = number,
+                            12 => self.rotation = number,
                             _ => {}
                         }
                     }
@@ -463,6 +470,15 @@ impl Player {
                 }
             }
         }
+        // dwidth/dheight include pixel aspect ratio, but not display rotation.
+        // Wait for all metadata before exposing dimensions to project creation.
+        [self.state.width, self.state.height] = match self.rotation {
+            Some(rotation) if rotation.rem_euclid(180.0) == 90.0 => {
+                [self.display_size[1], self.display_size[0]]
+            }
+            Some(_) => self.display_size,
+            None => [0, 0],
+        };
     }
 
     pub fn render(&mut self, size: [usize; 2]) -> Result<Option<RenderedFrame>, String> {
@@ -480,8 +496,18 @@ impl Player {
         }
         self.size = size;
         self.pixels.resize(size[0] * size[1], 0);
-        let mut dimensions = [size[0] as c_int, size[1] as c_int];
-        let mut stride = size[0] * 4;
+        let rotation = self.rotation.unwrap_or(0.0).rem_euclid(360.0);
+        if rotation % 90.0 != 0.0 {
+            return Err("Only display rotations in multiples of 90 degrees are supported.".into());
+        }
+        let rotation = rotation as u32;
+        let render_size = if rotation == 90 || rotation == 270 {
+            [size[1], size[0]]
+        } else {
+            size
+        };
+        let mut dimensions = [render_size[0] as c_int, render_size[1] as c_int];
+        let mut stride = render_size[0] * 4;
         let mut params = [
             Param {
                 kind: 17,
@@ -508,11 +534,24 @@ impl Player {
         // until rendering completes. Preserve mpv's audio-driven render timing.
         self.api
             .check(unsafe { (self.api.render)(self.renderer, params.as_mut_ptr()) })?;
-        let mut rgba = Vec::with_capacity(self.pixels.len() * 4);
-        for pixel in &self.pixels {
+        let mut rgba = vec![0; self.pixels.len() * 4];
+        for (index, pixel) in self.pixels.iter().enumerate() {
             let mut bytes = pixel.to_ne_bytes();
             bytes[3] = 255;
-            rgba.extend_from_slice(&bytes);
+            if rotation == 0 {
+                rgba[index * 4..index * 4 + 4].copy_from_slice(&bytes);
+                continue;
+            }
+            let x = index % render_size[0];
+            let y = index / render_size[0];
+            let (x, y) = match rotation {
+                90 => (render_size[1] - 1 - y, x),
+                180 => (render_size[0] - 1 - x, render_size[1] - 1 - y),
+                270 => (y, render_size[0] - 1 - x),
+                _ => (x, y),
+            };
+            let target = (y * size[0] + x) * 4;
+            rgba[target..target + 4].copy_from_slice(&bytes);
         }
         Ok(Some(RenderedFrame { size, rgba }))
     }

@@ -14,7 +14,9 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Steps 1 through 7 are implemented. The English-language native player opens a video,
+Steps 1 through 8 are implemented (Windows portable preview, not a signed installer).
+See [PORTABLE.md](PORTABLE.md) for installation, diagnostics, and shortcuts.
+The English-language native player opens a video,
 plays it with synchronized audio, pauses, seeks, steps one frame in either
 direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
@@ -50,10 +52,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-mpv.ps1
 ```
 
 This pins the Windows x64 build dated 2026-09-27, checks its SHA-256, and preserves
-the package's headers and license files under `tools/mpv/`. It does not change
+the package's headers under `tools/mpv/`. It does not change
 PATH. Alternatively set `VIDEO_ANNOTATIONS_MPV` to the full path to a compatible
-`libmpv-2.dll`. The app searches `tools/mpv/` from its working directory and from
-the executable's directory and parent directories.
+`libmpv-2.dll`. The app searches `tools/mpv/` beside the executable and its
+development ancestors before the working directory.
 
 For MP4 export, frame extraction, and integration-test fixtures, also install FFmpeg locally
 (download provider linked by [FFmpeg](https://ffmpeg.org/download.html)):
@@ -64,8 +66,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ffmpeg.ps1
 
 Alternatively, place FFmpeg 8 or newer and ffprobe on PATH, or set
 `VIDEO_ANNOTATIONS_FFMPEG` and `VIDEO_ANNOTATIONS_FFPROBE` to their full executable
-paths. The app also discovers `tools/ffmpeg/bin/` from the working directory or
-the executable's directory and its two parents. Installation does not alter PATH.
+paths. The app discovers `tools/ffmpeg/bin/` beside the executable and its
+development ancestors before the working directory. Installation does not alter PATH.
 
 Run:
 
@@ -75,8 +77,20 @@ cargo run
 cargo run -- "Movies_in/MindBlowing.mp4"
 ```
 
-Build a release executable with `cargo build --release`. Keep libmpv available
-using one of the locations above; this is not yet a standalone distribution.
+Build a release executable with `cargo build --release`. Use the optimized release
+build for normal use: CPU animation export is much slower in debug builds.
+Create a Windows x64 portable ZIP (media dependencies downloaded separately):
+
+```powershell
+./scripts/package-windows.ps1 -Offline
+# Validate the ZIP from an isolated temporary location using installed runtimes:
+./scripts/test-package.ps1 -Archive "dist/VideoAnnotations-<version>-windows-x64-<timestamp>.zip"
+```
+
+The script includes release executables, documentation, dependency notices,
+build information, and checksums. It does not publish a GitHub release or include
+local media/projects. No signing certificate, installer, or runtime redistribution
+bundle is configured. See [step 8 validation](docs/step-8-reliability.md).
 
 Verify:
 
@@ -84,6 +98,10 @@ Verify:
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+# Entire local suite including synthetic media, without physical audio:
+./scripts/validate.ps1 -Offline -Media
+# Same checks with optimized binaries:
+./scripts/validate.ps1 -Offline -Media -Release
 # Requires FFmpeg; generates its own temporary test video:
 cargo test --test media_integration -- --ignored
 # Export integration tests (timing, layers, audio, VFR, cancellation and failure):
@@ -96,6 +114,8 @@ cargo test --bin video-annotations live_playback_with_seek_slider -- --ignored
 cargo test --test playback_integration system_audio_device -- --ignored --nocapture
 # Diagnose a local file without the GUI (clocked null audio output):
 cargo run --example playback_probe -- "Movies_in/MindBlowing.mp4"
+# Runtime paths, tool versions, and libmpv software-renderer availability:
+cargo run --example runtime_check
 ```
 
 Local input videos belong in `Movies_in/`; that directory, downloaded FFmpeg/libmpv,
@@ -110,6 +130,10 @@ GOP videos. The position follows the playback engine; step commands follow actua
 frames, including tested variable-frame-rate media. Export currently supports
 SDR MP4 and GIF, up to 32 annotations and 9 megapixels; HDR tone mapping is not implemented.
 Animated export uses temporary PNG frames (maximum 18000 frames and 2 GiB).
+Display rotations of 90/180/270 degrees are applied to preview pixels and project
+dimensions; other angles are unsupported. Older projects saved with a quarter-turn
+source may contain the old, incorrect dimensions and be rejected as mismatched:
+retain a backup and recreate that project's annotations from the source video.
 Projects reference the source video rather than embedding it; keep the video
 alongside your project. There is no autosave or crash recovery yet. Opening
 another video/project or closing the window offers Save, Discard, and Cancel
@@ -244,3 +268,5 @@ See [architecture decisions](docs/architecture.md) and the
 [step 5 persistence design and validation](docs/step-5-persistence.md), and
 [step 6 export design and validation](docs/step-6-export.md), and
 [step 7 effects and GIF design and validation](docs/step-7-effects-gif.md).
+
+See also [step 8 reliability and portable packaging](docs/step-8-reliability.md).
