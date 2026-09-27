@@ -1,6 +1,8 @@
 use crate::{annotations::Annotation, media::VideoInfo};
 
-/// A project owns exactly one source video. Persistence arrives in step 5.
+/// A project owns exactly one source video, with annotations ordered back to front.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Project {
     pub video: VideoInfo,
     pub annotations: Vec<Annotation>,

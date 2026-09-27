@@ -14,7 +14,7 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Steps 1 through 4 are implemented. The English-language native player opens a video,
+Steps 1 through 5 are implemented. The English-language native player opens a video,
 plays it with synchronized audio, pauses, seeks, steps one frame in either
 direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
@@ -25,6 +25,8 @@ resize, recolor, and delete them using the annotation tools. Geometry and style
 sizes use video coordinates, preserving placement when the window changes size.
 The annotation timeline controls start/end times, seeking, creation at the
 playhead, and stacking order.
+Projects can be saved and reopened as `.vannot` files, with source-video relinking
+when the original path is missing. Annotation edits support undo and redo.
 
 The initial target is Windows. The UI uses egui/eframe; persistent playback uses
 libmpv, with FFmpeg internally. The step-1 FFmpeg/ffprobe extraction backend is
@@ -97,16 +99,20 @@ Preview rendering currently uses libmpv's software renderer, capped at 1280 x 72
 then uploads the result to an egui texture. Hardware video decoding and HDR color
 management are not yet validated. Backward frame stepping may be slower on long
 GOP videos. The position follows the playback engine; step commands follow actual
-frames, including tested variable-frame-rate media. Annotations exist only in
-memory. Saving, undo/redo, and export are not available yet.
-Opening another video or closing the window
-asks for confirmation before discarding annotations.
+frames, including tested variable-frame-rate media. Export is not available yet.
+Projects reference the source video rather than embedding it; keep the video
+alongside your project. There is no autosave or crash recovery yet. Opening
+another video/project or closing the window offers Save, Discard, and Cancel
+when there are unsaved changes.
 
 ## Player controls
 
 | Action | Shortcut |
 | --- | --- |
 | Open video | Ctrl+O |
+| Open project | Ctrl+Shift+O |
+| Save project / Save as | Ctrl+S / Ctrl+Shift+S |
+| Undo / Redo annotation edit | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z |
 | Play / pause / replay at end | Space |
 | Back / forward one second | Left / Right |
 | Back / forward five seconds | Shift+Left / Shift+Right |
@@ -142,8 +148,31 @@ Bring forward / Send backward move the selected annotation one layer at a time;
 the top timeline row is the front layer. Track dragging seeks; it does not trim
 or shift intervals. The whole video fits the ruler (no timeline zoom yet).
 
+## Project files
+
+Use Save to create a `.vannot` JSON file containing the video reference, geometry,
+text, colors, sizes, timing, and layer order. Open it through Open project,
+drag-and-drop, or `cargo run -- "Projects/example.vannot"`. The video itself is
+never modified. Store local projects in `Projects/` (ignored by Git), or beside
+the source video to make its saved path relative. Sources outside the project
+folder retain absolute paths, which may reveal local folder names when shared.
+
+If a source is missing, choose the original video in the locate dialog. Dimensions
+and duration must match the project; save again to retain the new reference.
+This checks metadata, not video identity. A failed or canceled opening leaves the
+current project intact. Save writes through a temporary sibling file before
+replacing the destination. An asterisk marks unsaved changes.
+
+Undo/redo covers annotation creation/deletion, geometry, style, text, timing, and
+layer order, retaining at most 100 full annotation snapshots for the current
+session. Mouse gestures are grouped; text edits group until focus leaves the
+field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo buttons
+for project history. Playback, selection, file operations, and source relinking
+are not undoable, and history is not stored in the project file.
+
 See [architecture decisions](docs/architecture.md) and the
 [step 1 validation report](docs/step-1-validation.md), and
 [step 2 playback design and validation](docs/step-2-playback.md), and
 [step 3 annotation design and validation](docs/step-3-annotations.md), and
-[step 4 timeline design and validation](docs/step-4-timeline.md).
+[step 4 timeline design and validation](docs/step-4-timeline.md), and
+[step 5 persistence design and validation](docs/step-5-persistence.md).

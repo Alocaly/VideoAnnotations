@@ -10,7 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VideoInfo {
     pub path: PathBuf,
     pub width: u32,

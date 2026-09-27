@@ -31,6 +31,7 @@ are not validated in this milestone.
 - `src/ui.rs`: window, file picker, timeline scrubber, texture upload, UI state.
 - `src/media.rs`: probing, decoding, errors, and a background worker; no GUI types.
 - `src/project.rs`: exactly one source video and its annotation collection.
+- `src/document.rs`: versioned JSON persistence, validation, safe file replacement, and bounded annotation history (step 5).
 - `src/annotations.rs`: video-coordinate shape data, hit testing, bounded translation.
 - `src/editor.rs`: annotation tools, selection, gestures, style controls, preview overlay (step 3).
 - `src/timeline.rs`: annotation tracks, temporal controls, creation and stacking controls (step 4); returns pause/seek actions to the player UI.

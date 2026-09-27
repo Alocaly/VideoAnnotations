@@ -8,6 +8,7 @@
 /Movies_in/
 /Movies_out/
 /exports/
+/Projects/
 *.mp4
 *.mov
 *.mkv

@@ -1,5 +1,5 @@
 //! Annotation geometry in oriented video pixels, independent of UI size.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Kind {
     Text,
     Rectangle,
@@ -17,7 +17,8 @@ impl Kind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Annotation {
     pub start_seconds: f64,
     pub end_seconds: f64,
