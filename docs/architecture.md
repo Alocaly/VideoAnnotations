@@ -1,5 +1,9 @@
 # Step 1: architecture decision
 
+This document records the original prototype. The active player now uses the
+persistent libmpv backend described in [step 2](step-2-playback.md); the subprocess
+backend below remains available for standalone probing and frame extraction.
+
 ## GUI: egui / eframe
 
 Use eframe with its OpenGL renderer for the native prototype. Immediate-mode UI

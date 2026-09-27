@@ -2944,6 +2944,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "image",
+ "libloading",
  "rfd",
  "serde",
  "serde_json",

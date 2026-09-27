@@ -14,14 +14,15 @@ A Rust desktop application for annotating a single video per project, currently 
 
 ## Status
 
-Step 1 is implemented: an English-language native window opens a video, displays
-metadata and a frame preview, and seeks using a slider or +/-1 and +/-5 second
-buttons. Files can be opened with the picker, drag-and-drop, or a command-line
-argument. Decoding runs in the background.
+Steps 1 and 2 are implemented. The English-language native player opens a video,
+plays it with synchronized audio, pauses, seeks, steps one frame in either
+direction, and switches to fullscreen. It includes a position/duration display,
+volume and mute, and replay at the end. Files open paused through the picker,
+drag-and-drop, or a command-line argument.
 
-The initial target is Windows. The prototype uses egui/eframe with an OpenGL
-renderer and FFmpeg/ffprobe subprocesses. Playback and audio are not implemented
-yet; they are the next milestone. Native file dialogs follow the OS language.
+The initial target is Windows. The UI uses egui/eframe; persistent playback uses
+libmpv, with FFmpeg internally. The step-1 FFmpeg/ffprobe extraction backend is
+retained separately. Native file dialogs follow the OS language.
 
 See [ROADMAP.md](ROADMAP.md) for implementation milestones and [Agent.md](Agent.md) for project requirements.
 
@@ -30,7 +31,20 @@ See [ROADMAP.md](ROADMAP.md) for implementation milestones and [Agent.md](Agent.
 Install stable Rust through rustup and Visual Studio Build Tools with the C++
 desktop workload on Windows. Commands below run from the repository root.
 
-Install FFmpeg locally (download provider linked by [FFmpeg](https://ffmpeg.org/download.html)):
+Install the tested libmpv build locally (requires 7-Zip installed or `7z` on PATH):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-mpv.ps1
+```
+
+This pins the Windows x64 build dated 2026-09-27, checks its SHA-256, and preserves
+the package's headers and license files under `tools/mpv/`. It does not change
+PATH. Alternatively set `VIDEO_ANNOTATIONS_MPV` to the full path to a compatible
+`libmpv-2.dll`. The app searches `tools/mpv/` from its working directory and from
+the executable's directory and parent directories.
+
+For frame extraction and integration-test fixtures, also install FFmpeg locally
+(download provider linked by [FFmpeg](https://ffmpeg.org/download.html)):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ffmpeg.ps1
@@ -49,7 +63,7 @@ cargo run
 cargo run -- "Movies_in/MindBlowing.mp4"
 ```
 
-Build a release executable with `cargo build --release`. Keep FFmpeg available
+Build a release executable with `cargo build --release`. Keep libmpv available
 using one of the locations above; this is not yet a standalone distribution.
 
 Verify:
@@ -60,18 +74,43 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 # Requires FFmpeg; generates its own temporary test video:
 cargo test --test media_integration -- --ignored
+# Playback integration tests with clocked null audio:
+cargo test --test playback_integration -- --ignored --skip system_audio_device
+# Optional real audio device check (plays a quiet test tone briefly):
+cargo test --test playback_integration system_audio_device -- --ignored --nocapture
+# Diagnose a local file without the GUI (clocked null audio output):
+cargo run --example playback_probe -- "Movies_in/MindBlowing.mp4"
 ```
 
-Local input videos belong in `Movies_in/`; that directory, downloaded FFmpeg,
+Local input videos belong in `Movies_in/`; that directory, downloaded FFmpeg/libmpv,
 build output, and generated media are excluded from Git. `Cargo.lock` is tracked.
 
 ## Prototype limitations
 
-Seeking launches FFmpeg per requested image and is not a real-time playback
-pipeline. Previews fit within 1280 x 720. Displayed times are seek requests, not
-decoded frame timestamps; exact frame navigation, variable-frame-rate edge cases,
-and synchronized audio belong to step 2. A finite video duration is required.
-No annotations, saving, or export are available yet.
+Preview rendering currently uses libmpv's software renderer, capped at 1280 x 720,
+then uploads the result to an egui texture. Hardware video decoding and HDR color
+management are not yet validated. Backward frame stepping may be slower on long
+GOP videos. The position follows the playback engine; step commands follow actual
+frames, including tested variable-frame-rate media. No annotations, saving, or
+export are available yet.
+
+## Player controls
+
+| Action | Shortcut |
+| --- | --- |
+| Open video | Ctrl+O |
+| Play / pause / replay at end | Space |
+| Back / forward one second | Left / Right |
+| Back / forward five seconds | Shift+Left / Shift+Right |
+| Previous / next frame (pauses playback) | Ctrl+Left / Ctrl+Right; also comma / period |
+| Fullscreen | F11 or double-click the preview |
+| Exit fullscreen | Esc |
+| Mute | M |
+
+The same navigation actions have buttons. The time slider seeks on release and
+preserves the play/pause state. Keyboard shortcuts do not interfere with typing
+in numeric fields. Opening the file picker pauses the current video.
 
 See [architecture decisions](docs/architecture.md) and the
-[step 1 validation report](docs/step-1-validation.md).
+[step 1 validation report](docs/step-1-validation.md), and
+[step 2 playback design and validation](docs/step-2-playback.md).
