@@ -226,11 +226,17 @@ Select an annotation, then expand **Effects** below its style controls:
 - **Move by X / Y**: total linear displacement in video pixels over the annotation
   lifetime. The stored box is the starting position; movement beyond the video
   is clipped. Seeking evaluates the same effect as continuous playback.
-- **Glow**: layered halo radius, 0–30 video pixels; zero disables it.
+- **Glow color pulse**: smoothly shifts the annotation color toward a lighter shade,
+  or toward a darker shade when its color is already very light. The 2-second
+  cycle returns to the original color; intensity 0–30, with zero disabling it.
+  It does not add a halo or change the annotation's transparency/size.
 - **Traveling outline** (rectangles/ellipses): a bright quarter-contour segment
   over a dim outline, with seconds per revolution (0.1–60).
 
 Effects compose and are included in save, undo/redo, fullscreen, MP4, and GIF.
+Older version-2 projects still open, but their saved Glow value now controls this
+color animation instead of the previous static halo. Keep a copy if that old
+appearance matters.
 An annotation with fade-in is invisible at its exact start; move the playhead
 forward to see it. Its selection handles remain available when paused.
 

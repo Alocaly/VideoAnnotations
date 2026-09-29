@@ -41,6 +41,7 @@ pub struct Effects {
     pub fade_out: f64,
     /// Linear displacement from the stored geometry over the active interval.
     pub movement: [f32; 2],
+    /// Color-pulse intensity (0–30). The saved field name is retained for v2 projects.
     pub glow: f32,
     /// Zero disables the traveling outline; otherwise seconds per revolution.
     pub outline_period: f64,
@@ -51,6 +52,7 @@ impl Annotation {
         self.effects.fade_in > 0.0
             || self.effects.fade_out > 0.0
             || self.effects.movement != [0.0; 2]
+            || self.effects.glow > 0.0
             || self.effects.outline_period > 0.0
     }
 
@@ -75,6 +77,22 @@ impl Annotation {
             1.0
         };
         a.color[3] = (self.color[3] as f64 * fade_in.min(fade_out)).round() as u8;
+        if self.effects.glow > 0.0 {
+            // Smooth two-second cycle: original color at 0/2 s, peak at 1 s.
+            // Bright colors pulse darker so even white has a visible variation.
+            let luminance = (0.2126 * self.color[0] as f32
+                + 0.7152 * self.color[1] as f32
+                + 0.0722 * self.color[2] as f32)
+                / 255.0;
+            let target = if luminance >= 0.75 { 0.0 } else { 255.0 };
+            let phase = std::f64::consts::PI * elapsed;
+            let pulse = ((1.0 - phase.cos()) * 0.5) as f32;
+            let mix = (self.effects.glow / 30.0).clamp(0.0, 1.0) * 0.55 * pulse;
+            for channel in 0..3 {
+                a.color[channel] =
+                    (self.color[channel] as f32 * (1.0 - mix) + target * mix).round() as u8;
+            }
+        }
         a
     }
     /// Half-open intervals, except the final video endpoint remains visible.
@@ -194,6 +212,30 @@ mod tests {
         a.effects.fade_in = 6.0;
         a.effects.fade_out = 6.0;
         assert_eq!(a.evaluated(2.5).color[3], 64);
+    }
+    #[test]
+    fn glow_pulses_dark_and_light_colors_without_changing_alpha_or_geometry() {
+        for (base, brighter) in [([30, 60, 90, 170], true), ([245, 245, 245, 170], false)] {
+            let mut a = Annotation::new(Kind::Ellipse, [10.0, 20.0], [50.0, 60.0], 4.0);
+            a.color = base;
+            a.effects.glow = 30.0;
+            assert!(a.animated());
+            assert_eq!(a.evaluated(0.0).color, base);
+            let peak = a.evaluated(1.0);
+            let halfway = a.evaluated(0.5);
+            assert_eq!(peak.color[3], base[3]);
+            assert_eq!((peak.a, peak.b), (a.a, a.b));
+            assert_eq!(peak.color[0] > base[0], brighter);
+            assert!(halfway.color[0] != base[0] && halfway.color[0] != peak.color[0]);
+            assert_eq!(a.evaluated(2.0).color, base);
+            a.effects.glow = 15.0;
+            let softer = a.evaluated(1.0);
+            assert!(softer.color[0].abs_diff(base[0]) < peak.color[0].abs_diff(base[0]));
+            assert_eq!(a.color, base);
+            a.effects.glow = 0.0;
+            assert!(!a.animated());
+            assert_eq!(a.evaluated(1.0).color, base);
+        }
     }
     #[test]
     fn intervals_use_start_inclusive_end_exclusive_and_include_video_end() {

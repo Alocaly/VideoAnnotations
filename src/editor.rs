@@ -175,13 +175,13 @@ impl Editor {
                                     .suffix(" s"),
                             )
                             .changed();
-                        ui.label("Glow");
+                        ui.label("Glow color pulse").on_hover_text("Color brightens or darkens and returns to its original shade every 2 seconds; 0 disables it.");
                         pause |= ui
                             .add(
                                 egui::DragValue::new(&mut a.effects.glow)
                                     .range(0.0..=30.0)
                                     .speed(0.5)
-                                    .suffix(" px"),
+                                    .suffix(" / 30"),
                             )
                             .changed();
                     });

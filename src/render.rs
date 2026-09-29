@@ -15,28 +15,6 @@ pub fn paint_at(
     if a.color[3] == 0 {
         return;
     }
-    if a.effects.glow > 0.0 {
-        for ring in (1..=3).rev() {
-            let mut halo = a.clone();
-            halo.color[3] = (a.color[3] as f32 * 0.10) as u8;
-            if a.kind == Kind::Text {
-                for direction in 0..8 {
-                    let angle = direction as f32 * std::f32::consts::TAU / 8.0;
-                    let d =
-                        egui::vec2(angle.cos(), angle.sin()) * a.effects.glow * ring as f32 / 3.0;
-                    let mut shadow = halo.clone();
-                    for point in [&mut shadow.a, &mut shadow.b] {
-                        point[0] += d.x;
-                        point[1] += d.y;
-                    }
-                    paint(p, &shadow, viewport, extent);
-                }
-            } else {
-                halo.thickness += a.effects.glow * ring as f32 * 2.0 / 3.0;
-                paint(p, &halo, viewport, extent);
-            }
-        }
-    }
     if a.effects.outline_period > 0.0 && matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
         let mut dim = a.clone();
         dim.color[3] = (a.color[3] as f32 * 0.25) as u8;
@@ -356,9 +334,18 @@ mod tests {
         let middle = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
         assert_eq!(middle.get_pixel(50, 21)[3], 255);
         assert_eq!(middle.get_pixel(25, 21)[3], 0);
-        a.effects.glow = 12.0;
-        let halo = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
-        assert!(halo.get_pixel(60, 30)[3] > middle.get_pixel(60, 30)[3]);
+        a.effects.glow = 30.0;
+        let pulsed = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
+        assert_eq!(pulsed.get_pixel(60, 21)[3], middle.get_pixel(60, 21)[3]);
+        assert_ne!(
+            pulsed.get_pixel(60, 21).0[..3],
+            middle.get_pixel(60, 21).0[..3]
+        );
+        assert_eq!(
+            pulsed.get_pixel(30, 21)[3],
+            0,
+            "Color pulse must not add a halo"
+        );
         a.effects = Default::default();
         a.effects.outline_period = 1.0;
         assert_ne!(

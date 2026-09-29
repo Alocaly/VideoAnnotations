@@ -358,3 +358,46 @@ fn static_gif_without_annotations_and_palette_cancellation() {
     );
     assert_eq!(std::fs::read(&out).unwrap(), original);
 }
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
+fn glow_only_is_time_varying_in_mp4_and_gif() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.mp4");
+    let mut project = fixture(&source, false);
+    let mut annotation = Annotation::new(Kind::Rectangle, [20.0, 20.0], [100.0, 70.0], 2.0);
+    annotation.color = [30, 60, 90, 255];
+    annotation.thickness = 10.0;
+    annotation.effects.glow = 30.0;
+    assert!(annotation.animated());
+    project.annotations.push(annotation);
+
+    let mp4 = dir.path().join("pulse.mp4");
+    export::export(&project, &mp4, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let mp4_start = pixel(&mp4, 0.0, 50, 24);
+    let mp4_peak = pixel(&mp4, 1.0, 50, 24);
+    assert!(
+        mp4_peak[1] > mp4_start[1] + 65,
+        "{mp4_start:?} -> {mp4_peak:?}"
+    );
+    assert!(
+        pixel(&mp4, 0.0, 50, 12).iter().all(|v| *v < 15),
+        "No halo should appear outside the shape"
+    );
+
+    let gif = dir.path().join("pulse.gif");
+    export::export_with_format(
+        &project,
+        &gif,
+        export::Format::Gif { width: 80, fps: 10 },
+        &AtomicBool::new(false),
+        |_, _| {},
+    )
+    .unwrap();
+    let gif_start = pixel_with_width(&gif, 0.0, 25, 12, 80);
+    let gif_peak = pixel_with_width(&gif, 1.0, 25, 12, 80);
+    assert!(
+        gif_peak[1] > gif_start[1] + 45,
+        "{gif_start:?} -> {gif_peak:?}"
+    );
+}

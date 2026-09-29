@@ -53,7 +53,8 @@ MP4 and GIF exports are separate rendered files. GIF has no audio.
 
 Text fields capture typing shortcuts. Select a text annotation, then edit its
 Text field above the preview. Expand Effects for fades, movement, glow, and
-the traveling outline. With fade-in enabled, seek past the annotation's start
+the traveling outline. Glow now pulses the annotation color rather than drawing
+a halo. With fade-in enabled, seek past the annotation's start
 to see it. See README.md for full instructions and limitations.
 
 ## Diagnostics and limits

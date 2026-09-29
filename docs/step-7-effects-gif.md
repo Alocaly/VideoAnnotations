@@ -2,7 +2,7 @@
 
 ## Model and renderer
 
-`Annotation::effects` stores fade durations, a linear displacement, halo radius,
+`Annotation::effects` stores fade durations, a linear displacement, Glow intensity,
 and traveling-outline period. Defaults disable all effects. `evaluated(time)`
 returns transformed geometry/color without mutating the project. Opacity is the
 minimum of the fade-in/out ramps multiplied by the base alpha; overlapping fades
@@ -11,8 +11,12 @@ interval and clipped at the video edges. Validation rejects nonfinite/unbounded
 settings. Document version 2 persists effects; version 1 remains readable.
 
 `render::paint_at` is shared by paused editing, playback, fullscreen, and export.
-Glow uses translucent layered strokes (offset glyphs for text), not a Gaussian
-blur. The default outline effect is a bright traveling quarter-contour over a
+Glow now animates the annotation color over a smooth two-second cycle, with no
+halo or changes to opacity. Darker colors shift toward white; already very light
+colors shift toward black. Intensity remains 0–30 in the persisted `glow` field.
+This replaced the original step-7 layered-halo rendering; existing version-2
+projects retain their values but render differently. The outline effect remains
+a bright traveling quarter-contour over a
 dim contour, with a configurable revolution period. Rectangles use perimeter
 distance; ellipses use angle. Outline is offered only for rectangles/ellipses.
 Picking, selection bounds, and resize input account for the animated displacement.
@@ -20,8 +24,8 @@ History stores effect edits with all other annotation state.
 
 ## Export
 
-Static projects retain the existing one-PNG-per-annotation path, including static
-glow. If any time-varying effect is enabled, the CPU renderer builds a single
+Static projects retain the existing one-PNG-per-annotation path. A nonzero Glow
+is now time-varying. If any time-varying effect is enabled, the CPU renderer builds a single
 transparent, composited scene for each overlay sample, preserving layer order.
 Lossless PNGs are written to a temporary directory: 60 samples/second for MP4,
 the selected frame rate for GIF. FFmpeg composites this stream onto source frames.
@@ -50,17 +54,19 @@ video or local test fixture is added to Git.
   and Clippy with warnings denied pass.
 - Unit tests cover deterministic effect evaluation, overlapping fades, unchanged
   stored geometry, version-1 migration/version-2 roundtrip, invalid effects, empty
-  transparent frames, movement, fade alpha, glow, and changing outline phase.
+  transparent frames, movement, fade alpha, color pulse, and changing outline phase.
 - FFmpeg integration verifies animated MP4 pixels at several times, GIF codec,
   dimensions, frame count/rate, absence of audio, Unicode paths, cancellation
   during animation preparation, and protected destinations. Existing static MP4,
   layer/timing, VFR, failure, and cancellation tests remain passing.
 - The real-time UI seek-slider regression and null-audio playback tests pass.
-- Native UI validation uses a five-second project with moving/fading/glowing text
+- The original native UI validation used a five-second project with moving/fading text
   and an ellipse with a traveling outline, including seek/fullscreen and the
   Effects panel. GIF export is exercised from the native save dialog.
   The resulting GIF was decoded and visually checked: 640×356, 75 frames over
-  five seconds, with the text halo and traveling ellipse correctly composited.
+  five seconds, with the then-current text halo and traveling ellipse correctly
+  composited. Subsequent tests check color pulsing in the shared renderer and
+  exported MP4/GIF frames.
 
 This milestone does not add keyframes, easing curves, arbitrary motion paths,
 audio effects, or additional formats beyond MP4/GIF. The dedicated ergonomics pass
