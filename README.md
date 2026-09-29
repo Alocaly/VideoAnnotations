@@ -155,8 +155,9 @@ when there are unsaved changes.
 | Exit fullscreen | Esc |
 | Mute | M |
 
-The same navigation actions have buttons. The time slider seeks on release and
-preserves the play/pause state. Keyboard shortcuts do not interfere with typing
+The same navigation actions have buttons. Dragging the time slider seeks and
+updates the video continuously, then leaves playback paused at the chosen frame.
+Keyboard shortcuts do not interfere with typing
 in numeric fields. Opening the file picker pauses the current video.
 Fullscreen hides the editor panels and timeline, fitting the video to the screen
 without cropping. Space, seeking keys, and mute still work. F11, Esc, or a

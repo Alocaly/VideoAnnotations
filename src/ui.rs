@@ -467,7 +467,9 @@ impl VideoApp {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
         let state = self.player.as_ref().map(|p| &p.state);
-        let time = state.map_or(0.0, |s| s.position);
+        let time = self
+            .scrub
+            .unwrap_or_else(|| state.map_or(0.0, |s| s.position));
         let editing = !fullscreen && state.is_none_or(|s| s.paused);
         let mut pause = false;
         if let Some(texture) = &self.texture {
@@ -618,9 +620,10 @@ impl eframe::App for VideoApp {
                         for (label,delta) in [("+1 s",1.0),("+5 s",5.0)] {
                             if ui.button(label).clicked() { self.act(|p| p.seek(s.position+delta)); }
                         }
-                        ui.label(format!("{} / {}", timecode(s.position), timecode(s.duration)));
+                        ui.label(format!("{} / {}", timecode(self.scrub.unwrap_or(s.position)), timecode(s.duration)));
                     });
                     if let Some(position) = seek_slider(ui, &mut self.scrub, s.position, s.duration) {
+                        if !s.paused { self.act(|p| p.pause(true)); }
                         self.act(|p| p.seek(position));
                     }
                     ui.horizontal(|ui| {
@@ -634,7 +637,7 @@ impl eframe::App for VideoApp {
             ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Esc: exit  |  M: mute");
             ui.small("Ctrl+S: save project  |  Ctrl+Shift+O: open project  |  Ctrl+Z / Ctrl+Y: undo / redo");
             if let Some(project) = self.project.as_mut() {
-                let action = self.editor.timeline(ui, project, state.as_ref().map_or(0.0, |s| s.position));
+                let action = self.editor.timeline(ui, project, self.scrub.unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)));
                 if action.pause { self.act(|p| p.pause(true)); }
                 if let Some(time) = action.seek { self.act(|p| p.seek(time)); }
             }
@@ -732,8 +735,10 @@ fn seek_slider(
         *scrub = Some(position);
         if !slider.dragged() {
             *scrub = None;
-            return Some(position);
         }
+        // User edits seek immediately so the video follows the pointer. The
+        // untouched playback clock never enters this branch.
+        return Some(position);
     }
     if slider.drag_stopped() {
         *scrub = None;
@@ -847,15 +852,62 @@ mod tests {
         let offset = player.state.position - start.elapsed().as_secs_f64();
         assert!(offset.abs() < 0.25, "Playback clock offset: {offset}");
         assert!(player.state.av_sync.is_some_and(|v| v.abs() < 0.15));
+
+        // The same slider must seek the real decoder before mouse-up.
+        let pressed = egui::pos2(250.0, 10.0);
+        let moved = egui::pos2(460.0, 10.0);
+        for (frame, events) in [
+            vec![
+                egui::Event::PointerMoved(pressed),
+                egui::Event::PointerButton {
+                    pos: pressed,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            vec![egui::Event::PointerMoved(moved)],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut target = None;
+            let mut output = ctx.run_ui(input(events), |ui| {
+                target = seek_slider(ui, &mut scrub, player.state.position, player.state.duration);
+            });
+            output.textures_delta.clear();
+            let target = target.expect("User drag should seek on each change");
+            player.pause(true).unwrap();
+            player.seek(target).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                player.poll();
+                player.render([320, 180]).unwrap();
+                if !player.state.seeking && (player.state.position - target).abs() < 0.06 {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Frame {frame}: {:?}",
+                    player.state
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if frame == 1 {
+                assert!(scrub.is_some(), "The pointer is still down");
+                assert!(target > 2.0, "Expected a later frame during drag: {target}");
+            }
+        }
     }
 
     #[test]
-    fn seek_slider_still_accepts_pointer_input_and_commits_on_release() {
+    fn seek_slider_updates_while_dragging_and_commits_on_release() {
         let ctx = egui::Context::default();
         let mut scrub = None;
         let mut seeks = Vec::new();
         let pointer = egui::pos2(250.0, 10.0);
-        for events in [
+        let moved = egui::pos2(460.0, 10.0);
+        for (frame, events) in [
             vec![],
             vec![
                 egui::Event::PointerMoved(pointer),
@@ -866,22 +918,39 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 },
             ],
+            vec![egui::Event::PointerMoved(moved)],
             vec![egui::Event::PointerButton {
-                pos: pointer,
+                pos: moved,
                 button: egui::PointerButton::Primary,
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
             }],
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let mut output = ctx.run_ui(input(events), |ui| {
                 if let Some(time) = seek_slider(ui, &mut scrub, 0.0, 5.0) {
                     seeks.push(time);
                 }
             });
             output.textures_delta.clear();
+            if frame == 2 {
+                assert!(
+                    seeks.len() >= 2,
+                    "Video must seek at press and during movement, before release: {seeks:?}"
+                );
+            }
         }
-        assert!(!seeks.is_empty());
-        assert!(seeks.iter().all(|t| *t > 1.0 && *t < 3.0));
+        assert!(
+            seeks.len() >= 2,
+            "Expected seeks before mouse release: {seeks:?}"
+        );
+        assert!(seeks[0] > 1.0 && seeks[0] < 3.0);
+        assert!(
+            seeks.iter().any(|time| *time > 3.0),
+            "Drag did not seek while moving: {seeks:?}"
+        );
         assert!(scrub.is_none());
     }
 
