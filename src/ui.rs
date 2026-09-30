@@ -10,6 +10,7 @@ use video_annotations::{
 pub struct VideoApp {
     gif_width: u32,
     gif_fps: u32,
+    gif_dialog: Option<GifExportOptions>,
     export: Option<video_annotations::export::Job>,
     export_progress: f32,
     export_message: Option<String>,
@@ -38,6 +39,7 @@ impl VideoApp {
         let mut app = Self {
             gif_width: 640,
             gif_fps: 15,
+            gif_dialog: None,
             export: None,
             export_progress: 0.0,
             export_message: None,
@@ -150,30 +152,12 @@ impl VideoApp {
                     .clicked()
                 {
                     ui.close();
-                    self.start_export(video_annotations::export::Format::Gif {
+                    self.act(|p| p.pause(true));
+                    self.gif_dialog = Some(GifExportOptions {
                         width: self.gif_width,
                         fps: self.gif_fps,
                     });
                 }
-                ui.separator();
-                ui.label("GIF settings");
-                ui.horizontal(|ui| {
-                    ui.label("Max width");
-                    ui.add(
-                        egui::DragValue::new(&mut self.gif_width)
-                            .range(64..=1920)
-                            .suffix(" px"),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Frame rate");
-                    ui.add(
-                        egui::DragValue::new(&mut self.gif_fps)
-                            .range(1..=30)
-                            .suffix(" fps"),
-                    );
-                });
-                ui.small("No audio • loops forever");
             });
             if ui
                 .add_enabled(self.history.can_undo(), egui::Button::new("Undo"))
@@ -190,6 +174,54 @@ impl VideoApp {
                 self.restore_history(true);
             }
         });
+    }
+
+    fn gif_export_dialog(&mut self, ctx: &egui::Context) {
+        let Some(options) = self.gif_dialog.as_mut() else {
+            return;
+        };
+        let mut confirm = false;
+        let mut cancel = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if !cancel {
+            egui::Modal::new(egui::Id::new("gif-export-options")).show(ctx, |ui| {
+                ui.heading("Export GIF");
+                ui.label("Choose the GIF settings before selecting a destination.");
+                egui::Grid::new("gif-export-settings")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Max width");
+                        ui.add(
+                            egui::DragValue::new(&mut options.width)
+                                .range(64..=1920)
+                                .suffix(" px"),
+                        );
+                        ui.end_row();
+                        ui.label("Frame rate");
+                        ui.add(
+                            egui::DragValue::new(&mut options.fps)
+                                .range(1..=30)
+                                .suffix(" fps"),
+                        );
+                        ui.end_row();
+                    });
+                ui.small("No audio • loops forever");
+                ui.horizontal(|ui| {
+                    confirm = ui.button("Continue to Save…").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        }
+        if cancel {
+            self.gif_dialog = None;
+        } else if confirm {
+            let options = self.gif_dialog.take().unwrap();
+            self.gif_width = options.width;
+            self.gif_fps = options.fps;
+            self.start_export(video_annotations::export::Format::Gif {
+                width: options.width,
+                fps: options.fps,
+            });
+        }
     }
 
     fn start_export(&mut self, format: video_annotations::export::Format) {
@@ -625,6 +657,9 @@ impl eframe::App for VideoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_export(&ctx);
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.gif_dialog = None;
+        }
         if ctx.input(|i| i.viewport().close_requested()) && self.export.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.error = Some("Wait for export to finish or cancel it before closing.".into());
@@ -636,12 +671,17 @@ impl eframe::App for VideoApp {
             self.pending = Some(Pending::Close);
         }
         self.update_player(&ctx);
-        if self.pending.is_none() && self.loading.is_none() && self.export.is_none() {
+        if self.pending.is_none()
+            && self.loading.is_none()
+            && self.export.is_none()
+            && self.gif_dialog.is_none()
+        {
             self.shortcuts(&ctx);
         }
         if self.pending.is_none()
             && self.export.is_none()
             && self.loading.is_none()
+            && self.gif_dialog.is_none()
             && let Some(path) = ctx.input(|i| {
                 i.raw
                     .dropped_files
@@ -734,6 +774,7 @@ impl eframe::App for VideoApp {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.text_edit_focused();
             self.history.observe(&project.annotations, editing);
         }
+        self.gif_export_dialog(&ctx);
         if self.pending.is_some() {
             let mut discard = false;
             let mut cancel = false;
@@ -770,6 +811,11 @@ impl eframe::App for VideoApp {
 enum Pending {
     Open(PathBuf),
     Close,
+}
+
+struct GifExportOptions {
+    width: u32,
+    fps: u32,
 }
 
 struct Loading {
@@ -1086,6 +1132,7 @@ mod tests {
         VideoApp {
             gif_width: 640,
             gif_fps: 15,
+            gif_dialog: None,
             export: None,
             export_progress: 0.0,
             export_message: None,

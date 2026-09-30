@@ -160,7 +160,8 @@ updates the video continuously, then leaves playback paused at the chosen frame.
 The top bar groups opening and saving under **File**, MP4 and GIF exports under
 **Export**, and keeps Undo/Redo as buttons. It shows the project and source video
 filenames after VideoAnnotations; an asterisk beside the project name means
-unsaved changes. GIF width and frame-rate settings are inside **Export**.
+unsaved changes. Choosing **Export GIF** opens a settings dialog before the
+native save dialog.
 Keyboard shortcuts do not interfere with typing
 in numeric fields. Opening the file picker pauses the current video.
 Fullscreen hides the editor panels and timeline, fitting the video to the screen
@@ -264,8 +265,9 @@ MP4 quality/size controls and packaging remain future work.
 
 ## Animated GIF export
 
-In **Export**, set **Max width** (64–1920 px, no upscaling) and **Frame rate**
-(1–30 fps), then choose **Export GIF**. Height follows the source aspect ratio. GIF has no audio
+Choose **Export GIF**, set **Max width** (64–1920 px, no upscaling) and
+**Frame rate** (1–30 fps) in the dialog, then continue to the native save
+dialog. Height follows the source aspect ratio. GIF has no audio
 and loops forever. It uses a global palette built in a separate pass and dithering;
 GIF color and centisecond timing limits can cause banding or rounded durations.
 Effects are sampled at the selected GIF frame rate. Export progress, cancellation,
