@@ -80,6 +80,118 @@ impl VideoApp {
             .is_some_and(|p| self.saved.as_ref() != Some(p))
     }
 
+    fn header_title(&self) -> String {
+        let Some(project) = &self.project else {
+            return "VideoAnnotations".into();
+        };
+        let project_name = self
+            .project_path
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map_or_else(
+                || "Untitled.vannot".into(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+        let video_name = self
+            .source
+            .as_ref()
+            .unwrap_or(&project.video.path)
+            .file_name()
+            .map_or_else(
+                || "Unknown video".into(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+        let unsaved = if self.dirty() { " *" } else { "" };
+        format!("VideoAnnotations ( {project_name}{unsaved} - {video_name} )")
+    }
+
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(self.header_title());
+            ui.menu_button("File", |ui| {
+                if ui.button("Open video…    Ctrl+O").clicked() {
+                    ui.close();
+                    self.picker();
+                }
+                if ui.button("Open project…    Ctrl+Shift+O").clicked() {
+                    ui.close();
+                    self.project_picker();
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(self.project.is_some(), egui::Button::new("Save    Ctrl+S"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.save(false);
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::new("Save as…    Ctrl+Shift+S"),
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    self.save(true);
+                }
+            });
+            ui.menu_button("Export", |ui| {
+                if ui
+                    .add_enabled(self.project.is_some(), egui::Button::new("Export MP4…"))
+                    .on_hover_text("H.264 / AAC, SDR; up to 32 annotations and 9 megapixels")
+                    .clicked()
+                {
+                    ui.close();
+                    self.start_export(video_annotations::export::Format::Mp4);
+                }
+                if ui
+                    .add_enabled(self.project.is_some(), egui::Button::new("Export GIF…"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.start_export(video_annotations::export::Format::Gif {
+                        width: self.gif_width,
+                        fps: self.gif_fps,
+                    });
+                }
+                ui.separator();
+                ui.label("GIF settings");
+                ui.horizontal(|ui| {
+                    ui.label("Max width");
+                    ui.add(
+                        egui::DragValue::new(&mut self.gif_width)
+                            .range(64..=1920)
+                            .suffix(" px"),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Frame rate");
+                    ui.add(
+                        egui::DragValue::new(&mut self.gif_fps)
+                            .range(1..=30)
+                            .suffix(" fps"),
+                    );
+                });
+                ui.small("No audio • loops forever");
+            });
+            if ui
+                .add_enabled(self.history.can_undo(), egui::Button::new("Undo"))
+                .on_hover_text("Ctrl+Z")
+                .clicked()
+            {
+                self.restore_history(false);
+            }
+            if ui
+                .add_enabled(self.history.can_redo(), egui::Button::new("Redo"))
+                .on_hover_text("Ctrl+Y / Ctrl+Shift+Z")
+                .clicked()
+            {
+                self.restore_history(true);
+            }
+        });
+    }
+
     fn start_export(&mut self, format: video_annotations::export::Format) {
         self.act(|p| p.pause(true));
         let Some(project) = &self.project else {
@@ -560,32 +672,8 @@ impl eframe::App for VideoApp {
             }
             if self.loading.is_some() { ui.label("Opening source video… Current project is kept until validation succeeds."); }
             if self.pending.is_some() || self.loading.is_some() { ui.disable(); }
-            ui.horizontal_wrapped(|ui| {
-                ui.heading("VideoAnnotations");
-                if ui.button("Open video...").on_hover_text("Ctrl+O").clicked() { self.picker(); }
-                if ui.button("Open project...").on_hover_text("Ctrl+Shift+O").clicked() { self.project_picker(); }
-                if ui.add_enabled(self.project.is_some(),egui::Button::new("Save")).on_hover_text("Ctrl+S").clicked() { self.save(false); }
-                if ui.add_enabled(self.project.is_some(),egui::Button::new("Save as...")).on_hover_text("Ctrl+Shift+S").clicked() { self.save(true); }
-                if ui.add_enabled(self.project.is_some(),egui::Button::new("Export MP4...")).on_hover_text("H.264 / AAC, SDR; up to 32 annotations and 9 megapixels").clicked() { self.start_export(video_annotations::export::Format::Mp4); }
-                if ui.add_enabled(self.history.can_undo(),egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() { self.restore_history(false); }
-                if ui.add_enabled(self.history.can_redo(),egui::Button::new("Redo")).on_hover_text("Ctrl+Y / Ctrl+Shift+Z").clicked() { self.restore_history(true); }
-                if ui.button(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }).on_hover_text("F11 / Esc").clicked() { self.toggle_fullscreen(); }
-            });
-            ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(self.project.is_some(), egui::Button::new("Export GIF...")).clicked() {
-                    self.start_export(video_annotations::export::Format::Gif { width: self.gif_width, fps: self.gif_fps });
-                }
-                ui.label("GIF max width");
-                ui.add(egui::DragValue::new(&mut self.gif_width).range(64..=1920).suffix(" px"));
-                ui.label("Frame rate");
-                ui.add(egui::DragValue::new(&mut self.gif_fps).range(1..=30).suffix(" fps"));
-                ui.small("No audio • loops forever");
-            });
-            if self.project.is_some() {
-                ui.label(format!("{}{}", self.project_path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy()).unwrap_or_else(|| "Untitled project".into()), if self.dirty() { " * (unsaved changes)" } else { " (saved)" }));
-            }
-            if let Some(path) = &self.source { ui.label(path.file_name().unwrap_or_default().to_string_lossy()); }
-            else { ui.label("Open a local video or drop one into this window."); }
+            self.top_bar(ui);
+            if self.project.is_none() { ui.label("Open a local video or drop one into this window."); }
             let state = self.player.as_ref().map(|p| p.state.clone());
             if let Some(s) = &state {
                 ui.horizontal(|ui| {
@@ -1019,6 +1107,28 @@ mod tests {
             scrub: None,
             context: egui::Context::default(),
         }
+    }
+
+    #[test]
+    fn header_shows_project_video_and_unsaved_state() {
+        let mut app = app();
+        assert_eq!(
+            app.header_title(),
+            "VideoAnnotations ( Untitled.vannot - fixture.mp4 )"
+        );
+        app.project_path = Some("Blowing.vannot".into());
+        app.source = Some("Blowing.mp4".into());
+        assert_eq!(
+            app.header_title(),
+            "VideoAnnotations ( Blowing.vannot - Blowing.mp4 )"
+        );
+        app.project.as_mut().unwrap().annotations.clear();
+        assert_eq!(
+            app.header_title(),
+            "VideoAnnotations ( Blowing.vannot * - Blowing.mp4 )"
+        );
+        app.project = None;
+        assert_eq!(app.header_title(), "VideoAnnotations");
     }
 
     #[test]
