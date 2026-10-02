@@ -38,11 +38,28 @@ fn orbit_point(a: &Annotation, phase: f32) -> [f32; 2] {
     let (min, max) = a.bounds();
     if a.kind == Kind::Ellipse {
         let angle = phase * std::f32::consts::TAU;
+        let radii = Vec2::new((max[0] - min[0]) * 0.5, (max[1] - min[1]) * 0.5);
+        // egui paints ellipse strokes outside the path. Offset along the
+        // ellipse normal (not its radial direction) to follow the stroke center.
+        let normal = Vec2::new(
+            angle.cos() / radii.x.max(f32::EPSILON),
+            angle.sin() / radii.y.max(f32::EPSILON),
+        )
+        .normalized();
+        let offset = normal * (a.thickness * 0.5);
         [
-            (min[0] + max[0]) * 0.5 + angle.cos() * (max[0] - min[0]) * 0.5,
-            (min[1] + max[1]) * 0.5 + angle.sin() * (max[1] - min[1]) * 0.5,
+            (min[0] + max[0]) * 0.5 + angle.cos() * radii.x + offset.x,
+            (min[1] + max[1]) * 0.5 + angle.sin() * radii.y + offset.y,
         ]
     } else {
+        // Rectangle strokes are inside the bounds. Keep the centerline inside
+        // even when the stroke is wider than the shape.
+        let inset = [
+            (a.thickness * 0.5).min((max[0] - min[0]) * 0.5),
+            (a.thickness * 0.5).min((max[1] - min[1]) * 0.5),
+        ];
+        let min = [min[0] + inset[0], min[1] + inset[1]];
+        let max = [max[0] - inset[0], max[1] - inset[1]];
         let w = max[0] - min[0];
         let h = max[1] - min[1];
         let d = phase * 2.0 * (w + h);
@@ -312,6 +329,29 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn orbit_follows_stroke_center_for_rectangles_and_ellipses() {
+        let mut a = Annotation::new(Kind::Rectangle, [20.0, 20.0], [100.0, 70.0], 2.0);
+        a.thickness = 10.0;
+        assert_eq!(orbit_point(&a, 0.0), [25.0, 25.0]);
+        assert_eq!(orbit_point(&a, 0.5), [95.0, 65.0]);
+        a.thickness = 200.0;
+        assert_eq!(orbit_point(&a, 0.3), [60.0, 45.0]);
+
+        a.kind = Kind::Ellipse;
+        a.thickness = 10.0;
+        assert_eq!(orbit_point(&a, 0.0), [105.0, 45.0]);
+        let bottom = orbit_point(&a, 0.25);
+        assert!((bottom[0] - 60.0).abs() < 0.001);
+        assert!((bottom[1] - 75.0).abs() < 0.001);
+        let angle = std::f32::consts::FRAC_PI_4;
+        let point = orbit_point(&a, 0.125);
+        let path = Vec2::new(60.0 + 40.0 * angle.cos(), 45.0 + 25.0 * angle.sin());
+        let offset = Vec2::new(point[0], point[1]) - path;
+        let tangent = Vec2::new(-40.0 * angle.sin(), 25.0 * angle.cos());
+        assert!((offset.length() - 5.0).abs() < 0.001);
+        assert!(offset.dot(tangent).abs() < 0.001);
+    }
     #[test]
     fn animated_scene_handles_fades_glow_and_colored_orbiting_ball() {
         let cancel = AtomicBool::new(false);

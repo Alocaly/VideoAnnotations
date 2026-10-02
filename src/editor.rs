@@ -546,13 +546,15 @@ impl Editor {
             .filter(|a| a.visible_at(time, project.video.duration))
         {
             let a = &a.evaluated(time);
-            let (min, max) = a.bounds();
-            painter.rect_stroke(
-                Rect::from_two_pos(map.screen(min), map.screen(max)),
-                0.0,
-                Stroke::new(1.0, Color32::LIGHT_BLUE),
-                egui::StrokeKind::Outside,
-            );
+            if a.kind != Kind::Rectangle {
+                let (min, max) = a.bounds();
+                painter.rect_stroke(
+                    Rect::from_two_pos(map.screen(min), map.screen(max)),
+                    0.0,
+                    Stroke::new(1.0, Color32::LIGHT_BLUE),
+                    egui::StrokeKind::Outside,
+                );
+            }
             for p in handles(a) {
                 painter.rect_filled(
                     Rect::from_center_size(map.screen(p), Vec2::splat(8.0)),
