@@ -25,8 +25,8 @@ drag-and-drop, or a command-line argument.
 Add text, rectangles, ellipses, and arrows directly on the preview. Select, move,
 resize, recolor, and delete them using the annotation tools. Geometry and style
 sizes use video coordinates, preserving placement when the window changes size.
-The annotation timeline controls start/end times, seeking, creation at the
-playhead, and stacking order.
+The annotation timeline holds the drawing tools and controls start/end times,
+seeking, and stacking order.
 Projects can be saved and reopened as `.vannot` files, with source-video relinking
 when the original path is missing. Annotation edits support undo and redo.
 Export MP4 burns the annotations into a new H.264 video with AAC source audio,
@@ -178,10 +178,11 @@ double-click returns to the editor.
 
 ## Annotation controls
 
-Choose a shape tool and drag on the video; choose Text and click to add a text
-box. Use Select to move an annotation and its blue handles to resize it. Arrows
-have two endpoint handles. Text-box resizing changes wrapping/clipping; Font size
-changes the lettering. The timeline also reaches covered annotations.
+Choose a shape tool in the timeline and drag on the video; choose Text there and
+click to add a text box. Use Select to move an annotation and its blue handles
+to resize it. Arrows have two endpoint handles. Text-box resizing changes
+wrapping/clipping; Font size changes the lettering. The timeline also reaches
+covered annotations.
 Color (including opacity), thickness, text content, font size, and effects are
 editable in the Properties panel to the right of the video. Delete removes the
 selection; Esc cancels an unfinished gesture. Delete and player shortcuts do
@@ -194,9 +195,10 @@ Focusing that field pauses playback. Selection bounds and resize handles appear
 only when paused in the editor, never during playback or video-only fullscreen.
 
 New annotations are drawn on top and start at the playhead, lasting five seconds
-or until the video ends. The timeline's Add buttons create a default shape that
-can then be positioned on the preview. Near EOF, creation is bounded to retain
-at least a 1 ms interval (or the full duration for shorter videos).
+or until the video ends. Choosing a timeline tool arms drawing on the preview;
+the timeline no longer creates a default shape on its own. Near EOF, creation
+is bounded to retain at least a 1 ms interval (or the full duration for shorter
+videos).
 
 Select a timeline row to seek to its start, or click/drag the ruler or a track to
 seek to that time and pause. Edit Start/End in seconds or use the playhead buttons.

@@ -95,7 +95,7 @@ impl Editor {
     pub fn tools(&mut self, ui: &mut egui::Ui) -> bool {
         let mut pause = false;
         ui.horizontal_wrapped(|ui| {
-            ui.label("Annotations");
+            ui.strong("Annotation timeline");
             if ui.selectable_label(self.tool.is_none(), "Select").clicked() {
                 self.tool = None;
             }
@@ -108,11 +108,11 @@ impl Editor {
                     pause = true;
                 }
             }
-        });
-        ui.small(match self.tool {
-            Some(Kind::Text) => "Click the video to add text. Edit its content in Properties.",
-            Some(_) => "Drag on the video to draw. Esc cancels.",
-            None => "Click to select; drag to move; drag a handle to resize.",
+            ui.small(match self.tool {
+                Some(Kind::Text) => "Click the video to add text. Edit its content in Properties.",
+                Some(_) => "Drag on the video to draw. Esc cancels.",
+                None => "Click to select; drag to move; drag a handle to resize.",
+            });
         });
         pause
     }

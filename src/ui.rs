@@ -857,9 +857,6 @@ impl eframe::App for VideoApp {
                 if pause {
                     self.act(|p| p.pause(true));
                 }
-                if self.editor.tools(ui) {
-                    self.act(|p| p.pause(true));
-                }
             }
             if let Some(project) = self.project.as_mut() {
                 // Keep room for the player controls and a usable video preview.

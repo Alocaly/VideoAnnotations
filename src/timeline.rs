@@ -1,9 +1,6 @@
 use crate::editor::Editor;
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
-use video_annotations::{
-    annotations::{Annotation, Kind},
-    project::Project,
-};
+use video_annotations::{annotations::Annotation, project::Project};
 
 #[derive(Default)]
 pub struct TimelineAction {
@@ -38,26 +35,7 @@ impl Editor {
     ) -> TimelineAction {
         let mut action = TimelineAction::default();
         let duration = project.video.duration;
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("Annotation timeline");
-            ui.label("Add at playhead:");
-            for kind in [Kind::Text, Kind::Rectangle, Kind::Ellipse, Kind::Arrow] {
-                if ui
-                    .add_enabled(duration > 0.0, egui::Button::new(kind.label()))
-                    .clicked()
-                {
-                    self.cancel(project);
-                    let w = project.video.width as f32;
-                    let h = project.video.height as f32;
-                    let a =
-                        Annotation::new(kind, [w * 0.25, h * 0.25], [w * 0.65, h * 0.55], duration)
-                            .at_playhead(time, duration);
-                    action.seek = Some(a.start_seconds);
-                    project.annotations.push(a);
-                    self.selected = Some(project.annotations.len() - 1);
-                }
-            }
-        });
+        action.pause |= self.tools(ui);
         ui.horizontal_wrapped(|ui| {
             if let Some(index) = self.selected.filter(|i| *i < project.annotations.len()) {
                 let a = &mut project.annotations[index];
@@ -168,7 +146,7 @@ impl Editor {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if project.annotations.is_empty() {
-                    ui.label("No annotations. Add one above or draw on the video.");
+                    ui.label("No annotations. Choose a tool above, then draw on the video.");
                 }
                 for index in (0..project.annotations.len()).rev() {
                     ui.push_id(index, |ui| {
@@ -436,6 +414,7 @@ fn apply_handle(a: &mut Annotation, handle: Handle, time: f64, duration: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use video_annotations::annotations::Kind;
     #[test]
     fn ruler_maps_to_bounded_video_time() {
         let rect = Rect::from_min_size(egui::pos2(120.0, 0.0), egui::vec2(400.0, 20.0));
