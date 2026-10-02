@@ -138,12 +138,14 @@ impl Editor {
                         .truncate()
                         .halign(egui::Align::Center),
                 );
-                if ui
-                    .add_enabled(self.selected.is_some(), egui::Button::new("✎").min_size(egui::vec2(button_width, 24.0)))
-                    .on_hover_text("Rename annotation")
-                    .clicked()
-                    && let Some(index) = self.selected
-                {
+                let rename_button = ui
+                    .add_enabled(
+                        self.selected.is_some(),
+                        egui::Button::new("").min_size(egui::vec2(button_width, 24.0)),
+                    )
+                    .on_hover_text("Rename annotation");
+                paint_pencil_icon(ui, &rename_button);
+                if rename_button.clicked() && let Some(index) = self.selected {
                     self.rename = Some(RenameDraft {
                         index,
                         name: project.annotations[index].display_name(index),
@@ -514,6 +516,28 @@ fn normalize_annotation_name(name: &str) -> Result<&str, String> {
     } else {
         Ok(name)
     }
+}
+
+fn paint_pencil_icon(ui: &egui::Ui, button: &egui::Response) {
+    if !ui.is_rect_visible(button.rect) {
+        return;
+    }
+    let center = button.rect.center();
+    let point = |x: f32, y: f32| center + egui::vec2(x, y);
+    let color = ui.style().interact(button).fg_stroke.color;
+    let stroke = Stroke::new(1.5, color);
+    ui.painter().add(egui::Shape::closed_line(
+        vec![
+            point(-6.0, 6.0),
+            point(-4.0, 1.0),
+            point(3.0, -6.0),
+            point(6.0, -3.0),
+            point(-1.0, 4.0),
+        ],
+        stroke,
+    ));
+    ui.painter()
+        .line_segment([point(-4.0, 1.0), point(-1.0, 4.0)], stroke);
 }
 
 fn pick(project: &Project, p: [f32; 2], tolerance: f32, time: f64) -> Option<usize> {
