@@ -843,13 +843,17 @@ impl eframe::App for VideoApp {
                 ui.colored_label(egui::Color32::LIGHT_RED, error);
             }
             if let Some(project) = self.project.as_mut() {
-                let pause = ui
-                    .scope(|ui| {
-                        ui.set_min_height(126.0);
-                        self.editor.toolbar(ui, project)
-                    })
+                let pause = egui::Panel::right("annotation-properties")
+                    .default_size(280.0)
+                    .min_size(220.0)
+                    .max_size(360.0)
+                    .resizable(true)
+                    .show(ui, |ui| self.editor.properties(ui, project))
                     .inner;
                 if pause {
+                    self.act(|p| p.pause(true));
+                }
+                if self.editor.tools(ui) {
                     self.act(|p| p.pause(true));
                 }
             }
@@ -1487,6 +1491,39 @@ mod tests {
             output.textures_delta.clear();
         }
         assert!(heights[3] < heights[1], "panel did not shrink: {heights:?}");
+    }
+
+    #[test]
+    fn properties_panel_stays_right_of_video_and_timeline() {
+        let mut app = app();
+        let ctx = app.context.clone();
+        for frame in 0..2 {
+            let mut output = ctx.run_ui(input(vec![]), |ui| {
+                let outer = ui.available_rect_before_wrap();
+                let properties = egui::Panel::right("test-properties")
+                    .default_size(280.0)
+                    .min_size(220.0)
+                    .max_size(360.0)
+                    .resizable(true)
+                    .show(ui, |ui| {
+                        app.editor.properties(ui, app.project.as_mut().unwrap())
+                    });
+                let timeline = egui::Panel::bottom("test-timeline")
+                    .default_size(180.0)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        app.editor.timeline(ui, app.project.as_mut().unwrap(), 0.0)
+                    });
+                if frame == 1 {
+                    assert!((properties.response.rect.right() - outer.right()).abs() <= 1.0);
+                    assert!(
+                        timeline.response.rect.right() <= properties.response.rect.left() + 1.0
+                    );
+                    assert!(ui.available_width() < outer.width() - 220.0);
+                }
+            });
+            output.textures_delta.clear();
+        }
     }
 
     #[test]

@@ -77,7 +77,7 @@ impl Editor {
     pub fn can_toggle_fullscreen(&self) -> bool {
         self.tool.is_none() && self.selected.is_none() && self.drag.is_none()
     }
-    pub fn toolbar(&mut self, ui: &mut egui::Ui, project: &mut Project) -> bool {
+    pub fn tools(&mut self, ui: &mut egui::Ui) -> bool {
         let mut pause = false;
         ui.horizontal_wrapped(|ui| {
             ui.label("Annotations");
@@ -93,7 +93,25 @@ impl Editor {
                     pause = true;
                 }
             }
+        });
+        ui.small(match self.tool {
+            Some(Kind::Text) => "Click the video to add text. Edit its content in Properties.",
+            Some(_) => "Drag on the video to draw. Esc cancels.",
+            None => "Click to select; drag to move; drag a handle to resize.",
+        });
+        pause
+    }
+
+    pub fn properties(&mut self, ui: &mut egui::Ui, project: &mut Project) -> bool {
+        let mut pause = false;
+        ui.heading("Properties");
+        egui::ScrollArea::vertical()
+            .id_salt("annotation-properties-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+            ui.label("Annotation");
             egui::ComboBox::from_id_salt("annotation-selection")
+                .width(ui.available_width())
                 .selected_text(
                     self.selected
                         .and_then(|i| project.annotations.get(i))
@@ -115,118 +133,73 @@ impl Editor {
                         }
                     }
                 });
-            if ui
-                .add_enabled(self.selected.is_some(), egui::Button::new("Delete"))
-                .clicked()
-            {
-                self.delete(project);
-            }
-        });
-        if let Some(a) = self.selected.and_then(|i| project.annotations.get_mut(i)) {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Color");
-                ui.color_edit_button_srgba_unmultiplied(&mut a.color);
+            ui.separator();
+            if let Some(a) = self.selected.and_then(|i| project.annotations.get_mut(i)) {
+                ui.strong("Appearance");
+                ui.horizontal(|ui| {
+                    ui.label("Color");
+                    pause |= ui.color_edit_button_srgba_unmultiplied(&mut a.color).changed();
+                });
                 if a.kind == Kind::Text {
-                    ui.label("Font size");
-                    ui.add(
-                        egui::DragValue::new(&mut a.font_size)
-                            .range(6.0..=300.0)
-                            .speed(1.0),
-                    );
-                } else {
-                    ui.label("Thickness");
-                    ui.add(
-                        egui::DragValue::new(&mut a.thickness)
-                            .range(1.0..=60.0)
-                            .speed(0.5),
-                    );
-                }
-                ui.label("Sizes in video pixels");
-            });
-            if a.kind == Kind::Text {
-                ui.label("Text content");
-                let response = ui.add(
-                    egui::TextEdit::multiline(&mut a.text)
-                        .id(egui::Id::new(("annotation-text", self.selected)))
-                        .desired_rows(2)
-                        .desired_width(ui.available_width()),
-                );
-                pause |= response.has_focus();
-            }
-            egui::CollapsingHeader::new("Effects")
-                .id_salt(("effects", self.selected))
-                .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Fade in");
-                        pause |= ui
-                            .add(
-                                egui::DragValue::new(&mut a.effects.fade_in)
-                                    .range(0.0..=86400.0)
-                                    .speed(0.05)
-                                    .suffix(" s"),
-                            )
-                            .changed();
-                        ui.label("Fade out");
-                        pause |= ui
-                            .add(
-                                egui::DragValue::new(&mut a.effects.fade_out)
-                                    .range(0.0..=86400.0)
-                                    .speed(0.05)
-                                    .suffix(" s"),
-                            )
-                            .changed();
-                        ui.label("Glow color pulse").on_hover_text("Color brightens or darkens and returns to its original shade every 2 seconds; 0 disables it.");
-                        pause |= ui
-                            .add(
-                                egui::DragValue::new(&mut a.effects.glow)
-                                    .range(0.0..=30.0)
-                                    .speed(0.5)
-                                    .suffix(" / 30"),
-                            )
-                            .changed();
+                    ui.horizontal(|ui| {
+                        ui.label("Font size");
+                        pause |= ui.add(egui::DragValue::new(&mut a.font_size).range(6.0..=300.0).speed(1.0).suffix(" px")).changed();
                     });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Move by X / Y");
-                        for (axis, limit) in [project.video.width, project.video.height]
-                            .into_iter()
-                            .enumerate()
-                        {
-                            pause |= ui
-                                .add(
-                                    egui::DragValue::new(&mut a.effects.movement[axis])
-                                        .range(-(limit as f32)..=limit as f32)
-                                        .speed(1.0)
-                                        .suffix(" px"),
-                                )
-                                .changed();
+                    ui.label("Text content");
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut a.text)
+                            .id(egui::Id::new(("annotation-text", self.selected)))
+                            .desired_rows(3)
+                            .desired_width(ui.available_width()),
+                    );
+                    pause |= response.has_focus();
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Thickness");
+                        pause |= ui.add(egui::DragValue::new(&mut a.thickness).range(1.0..=60.0).speed(0.5).suffix(" px")).changed();
+                    });
+                }
+                ui.separator();
+                egui::CollapsingHeader::new("Effects")
+                    .id_salt(("effects", self.selected))
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Fade in");
+                            pause |= ui.add(egui::DragValue::new(&mut a.effects.fade_in).range(0.0..=86400.0).speed(0.05).suffix(" s")).changed();
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Fade out");
+                            pause |= ui.add(egui::DragValue::new(&mut a.effects.fade_out).range(0.0..=86400.0).speed(0.05).suffix(" s")).changed();
+                        });
+                        ui.label("Glow color pulse").on_hover_text("Color brightens or darkens and returns to its original shade every 2 seconds; 0 disables it.");
+                        pause |= ui.add(egui::DragValue::new(&mut a.effects.glow).range(0.0..=30.0).speed(0.5).suffix(" / 30")).changed();
+                        for (axis, limit, label) in [(0, project.video.width, "Move by X"), (1, project.video.height, "Move by Y")] {
+                            ui.horizontal(|ui| {
+                                ui.label(label);
+                                pause |= ui.add(egui::DragValue::new(&mut a.effects.movement[axis]).range(-(limit as f32)..=limit as f32).speed(1.0).suffix(" px")).changed();
+                            });
                         }
                         ui.small("Linear motion over the annotation lifetime; edges are clipped.");
-                    });
-                    if matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
-                        ui.horizontal(|ui| {
+                        if matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
                             let mut enabled = a.effects.outline_period > 0.0;
                             if ui.checkbox(&mut enabled, "Traveling outline").changed() {
                                 a.effects.outline_period = if enabled { 2.0 } else { 0.0 };
                                 pause = true;
                             }
                             if enabled {
-                                pause |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut a.effects.outline_period)
-                                            .range(0.1..=60.0)
-                                            .speed(0.1)
-                                            .suffix(" s / turn"),
-                                    )
-                                    .changed();
+                                pause |= ui.add(egui::DragValue::new(&mut a.effects.outline_period).range(0.1..=60.0).speed(0.1).suffix(" s / turn")).changed();
                             }
-                        });
-                    }
-                });
-        }
-        ui.small(match self.tool {
-            Some(Kind::Text)=>"Click the video to add text. Edit its content below the tools.",
-            Some(_)=>"Drag on the video to draw. Esc cancels.",
-            None=>"Click to select; drag to move; drag a handle to resize. Delete removes the selection.",
+                        }
+                    });
+                ui.separator();
+                if ui.button("Delete annotation").clicked() {
+                    self.delete(project);
+                    pause = true;
+                }
+            } else {
+                ui.label("Select an annotation on the video or timeline to edit its properties.");
+            }
         });
         pause
     }
@@ -516,7 +489,7 @@ mod tests {
                 if frame == 0 {
                     ctx.memory_mut(|m| m.request_focus(id));
                 }
-                assert!(editor.toolbar(ui, &mut project));
+                assert!(editor.properties(ui, &mut project));
             });
             output.textures_delta.clear();
             assert!(ctx.memory(|m| m.has_focus(id)));

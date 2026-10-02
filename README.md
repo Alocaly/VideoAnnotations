@@ -180,11 +180,12 @@ Choose a shape tool and drag on the video; choose Text and click to add a text
 box. Use Select to move an annotation and its blue handles to resize it. Arrows
 have two endpoint handles. Text-box resizing changes wrapping/clipping; Font size
 changes the lettering. The selection menu also reaches covered annotations.
-Color (including opacity), thickness, text content, and font size are editable
-above the preview. Delete removes the selection; Esc cancels an unfinished
-gesture. Delete and player shortcuts do not interfere with text entry.
+Color (including opacity), thickness, text content, font size, and effects are
+editable in the Properties panel to the right of the video. Delete removes the
+selection; Esc cancels an unfinished gesture. Delete and player shortcuts do
+not interfere with text entry.
 To edit text, select its annotation (on the preview, in the timeline, or in the
-selection menu), then edit the **Text content** field below the annotation tools.
+selection menu), then edit the **Text content** field in Properties.
 Focusing that field pauses playback. Selection bounds and resize handles appear
 only when paused in the editor, never during playback or video-only fullscreen.
 
