@@ -145,8 +145,8 @@ impl Editor {
         });
         egui::ScrollArea::vertical()
             .id_salt("annotation-tracks")
-            .max_height(90.0)
-            .auto_shrink([false, true])
+            .max_height(ui.available_height())
+            .auto_shrink([false, false])
             .show(ui, |ui| {
                 if project.annotations.is_empty() {
                     ui.label("No annotations. Add one above or draw on the video.");

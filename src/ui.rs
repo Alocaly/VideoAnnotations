@@ -858,8 +858,13 @@ impl eframe::App for VideoApp {
                 }
             }
             if let Some(project) = self.project.as_mut() {
+                // Keep room for the player controls and a usable video preview.
+                let max_timeline_height = (ui.available_height() - 180.0).max(180.0);
                 let action = egui::Panel::bottom("annotation-timeline")
-                    .default_size(180.0)
+                    .default_size(200.0)
+                    .min_size(180.0)
+                    .max_size(max_timeline_height)
+                    .resizable(true)
                     .frame(egui::Frame::NONE)
                     .show(ui, |ui| {
                         self.editor.timeline(
@@ -1491,6 +1496,53 @@ mod tests {
             output.textures_delta.clear();
         }
         assert!(heights[3] < heights[1], "panel did not shrink: {heights:?}");
+    }
+
+    #[test]
+    fn bottom_panel_splitter_changes_timeline_height() {
+        let ctx = egui::Context::default();
+        let render = |events| {
+            let mut rect = egui::Rect::NOTHING;
+            let mut output = ctx.run_ui(input(events), |ui| {
+                rect = egui::Panel::bottom("resizable-timeline-test")
+                    .default_size(200.0)
+                    .min_size(180.0)
+                    .max_size(400.0)
+                    .resizable(true)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.take_available_space();
+                    })
+                    .response
+                    .rect;
+            });
+            output.textures_delta.clear();
+            rect
+        };
+        render(vec![]);
+        let initial = render(vec![]);
+        let handle = egui::pos2(400.0, initial.top());
+        render(vec![egui::Event::PointerMoved(handle)]);
+        render(vec![egui::Event::PointerButton {
+            pos: handle,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let moved = handle - egui::vec2(0.0, 80.0);
+        render(vec![egui::Event::PointerMoved(moved)]);
+        render(vec![egui::Event::PointerMoved(moved)]);
+        render(vec![egui::Event::PointerButton {
+            pos: moved,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let resized = render(vec![]);
+        assert!(
+            resized.height() > initial.height() + 40.0,
+            "splitter did not grow timeline: {initial:?} -> {resized:?}"
+        );
     }
 
     #[test]
