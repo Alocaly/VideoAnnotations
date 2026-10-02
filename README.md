@@ -200,13 +200,18 @@ at least a 1 ms interval (or the full duration for shorter videos).
 
 Select a timeline row to seek to its start, or click/drag the ruler or a track to
 seek to that time and pause. Edit Start/End in seconds or use the playhead buttons.
+Each annotation bar has four draggable points: the white points at its lower
+corners change its start and end, while the blue points along its upper edge
+set fade-in and fade-out durations. Triangles show the fade regions. Hover a
+point to see its value; dragging a point pauses playback without seeking.
 The timeline stays at the bottom of the window. Drag its upper border to resize
 the timeline and video area; tracks scroll when the timeline is too short.
 Intervals include their start but exclude their end, except at the video endpoint.
 Hidden annotations remain selectable in the timeline, not on the preview.
 Bring forward / Send backward move the selected annotation one layer at a time;
-the top timeline row is the front layer. Track dragging seeks; it does not trim
-or shift intervals. The whole video fits the ruler (no timeline zoom yet).
+the top timeline row is the front layer. Dragging the track away from the points
+seeks; the bar itself does not shift as a whole. The whole video fits the ruler
+(no timeline zoom yet).
 
 ## Project files
 

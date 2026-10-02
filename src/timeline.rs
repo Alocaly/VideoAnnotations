@@ -1,5 +1,5 @@
 use crate::editor::Editor;
-use eframe::egui::{self, Color32, Rect, Stroke};
+use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 use video_annotations::{
     annotations::{Annotation, Kind},
     project::Project,
@@ -9,6 +9,20 @@ use video_annotations::{
 pub struct TimelineAction {
     pub pause: bool,
     pub seek: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Handle {
+    Start,
+    End,
+    FadeIn,
+    FadeOut,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TimelineDrag {
+    index: usize,
+    handle: Handle,
 }
 
 impl Editor {
@@ -157,6 +171,8 @@ impl Editor {
                             let a = &project.annotations[index];
                             let start = a.start_seconds;
                             let end = a.end_seconds;
+                            let fade_in = a.effects.fade_in;
+                            let fade_out = a.effects.fade_out;
                             let color = Color32::from_rgb(a.color[0], a.color[1], a.color[2]);
                             let label = a.display_name(index);
                             if ui
@@ -170,24 +186,53 @@ impl Editor {
                                 action.seek = Some(start);
                             }
                             let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 22.0),
+                                egui::vec2(ui.available_width(), 30.0),
                                 egui::Sense::click_and_drag(),
                             );
                             let p = ui.painter();
                             p.rect_filled(rect, 2.0, Color32::from_gray(35));
-                            let x = |t: f64| {
-                                rect.left()
-                                    + rect.width()
-                                        * (t / duration.max(f64::EPSILON)).clamp(0.0, 1.0) as f32
-                            };
+                            let x = |t: f64| x_at_time(rect, t, duration);
                             let bar = Rect::from_min_max(
-                                egui::pos2(x(start), rect.top() + 2.0),
+                                egui::pos2(x(start), rect.top() + 3.0),
                                 egui::pos2(
                                     x(end).max(x(start) + 1.0).min(rect.right()),
-                                    rect.bottom() - 2.0,
+                                    rect.bottom() - 3.0,
                                 ),
                             );
                             p.rect_filled(bar, 2.0, color.gamma_multiply(0.65));
+                            let positions =
+                                handle_positions(rect, start, end, fade_in, fade_out, duration);
+                            let fade_color = Color32::from_black_alpha(110);
+                            if fade_in > 0.0 {
+                                p.add(egui::Shape::convex_polygon(
+                                    vec![
+                                        egui::pos2(x(start), bar.top()),
+                                        egui::pos2(x(start), bar.bottom()),
+                                        positions[2].1,
+                                    ],
+                                    fade_color,
+                                    Stroke::NONE,
+                                ));
+                                p.line_segment(
+                                    [egui::pos2(x(start), bar.bottom()), positions[2].1],
+                                    Stroke::new(1.5, Color32::WHITE),
+                                );
+                            }
+                            if fade_out > 0.0 {
+                                p.add(egui::Shape::convex_polygon(
+                                    vec![
+                                        positions[3].1,
+                                        egui::pos2(x(end), bar.top()),
+                                        egui::pos2(x(end), bar.bottom()),
+                                    ],
+                                    fade_color,
+                                    Stroke::NONE,
+                                ));
+                                p.line_segment(
+                                    [positions[3].1, egui::pos2(x(end), bar.bottom())],
+                                    Stroke::new(1.5, Color32::WHITE),
+                                );
+                            }
                             if self.selected == Some(index) {
                                 p.rect_stroke(
                                     bar,
@@ -203,13 +248,77 @@ impl Editor {
                                 ],
                                 Stroke::new(1.5, Color32::LIGHT_RED),
                             );
-                            let response =
-                                response.on_hover_text(format!("{start:.3} – {end:.3} s"));
-                            if (response.clicked() || response.dragged())
+                            for (handle, center) in positions {
+                                let fill = match handle {
+                                    Handle::Start | Handle::End => Color32::WHITE,
+                                    Handle::FadeIn | Handle::FadeOut => Color32::LIGHT_BLUE,
+                                };
+                                p.circle_filled(center, 4.5, fill);
+                                p.circle_stroke(center, 4.5, Stroke::new(1.0, Color32::BLACK));
+                            }
+                            let hovered = response
+                                .hover_pos()
+                                .and_then(|pos| handle_at(positions, pos));
+                            if hovered.is_some()
+                                || self.timeline_drag.is_some_and(|drag| drag.index == index)
+                            {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                            }
+                            let tooltip = match hovered {
+                                Some(Handle::Start) => {
+                                    format!("Start: {start:.3} s — drag to change")
+                                }
+                                Some(Handle::End) => format!("End: {end:.3} s — drag to change"),
+                                Some(Handle::FadeIn) => {
+                                    format!("Fade in: {fade_in:.3} s — drag to change")
+                                }
+                                Some(Handle::FadeOut) => {
+                                    format!("Fade out: {fade_out:.3} s — drag to change")
+                                }
+                                None => format!("{start:.3} – {end:.3} s"),
+                            };
+                            let response = response.on_hover_text(tooltip);
+                            if response.drag_started()
+                                && let Some(pos) = ui
+                                    .input(|i| i.pointer.press_origin())
+                                    .or_else(|| response.interact_pointer_pos())
+                            {
+                                self.timeline_drag = handle_at(positions, pos)
+                                    .map(|handle| TimelineDrag { index, handle });
+                                self.select(project, index);
+                                if self.timeline_drag.is_some() {
+                                    action.pause = true;
+                                }
+                            }
+                            if response.dragged()
+                                && let Some(pos) = response.interact_pointer_pos()
+                            {
+                                if let Some(drag) =
+                                    self.timeline_drag.filter(|drag| drag.index == index)
+                                {
+                                    apply_handle(
+                                        &mut project.annotations[index],
+                                        drag.handle,
+                                        time_at_x(rect, pos.x, duration),
+                                        duration,
+                                    );
+                                    action.pause = true;
+                                } else {
+                                    self.select(project, index);
+                                    action.seek = Some(time_at_x(rect, pos.x, duration));
+                                }
+                            } else if response.clicked()
                                 && let Some(pos) = response.interact_pointer_pos()
                             {
                                 self.select(project, index);
-                                action.seek = Some(time_at_x(rect, pos.x, duration));
+                                if handle_at(positions, pos).is_none() {
+                                    action.seek = Some(time_at_x(rect, pos.x, duration));
+                                } else {
+                                    action.pause = true;
+                                }
+                            }
+                            if response.drag_stopped() {
+                                self.timeline_drag = None;
                             }
                         });
                     });
@@ -224,6 +333,64 @@ fn time_at_x(rect: Rect, x: f32, duration: f64) -> f64 {
     ((x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0) as f64 * duration
 }
 
+fn x_at_time(rect: Rect, time: f64, duration: f64) -> f32 {
+    rect.left() + rect.width() * (time / duration.max(f64::EPSILON)).clamp(0.0, 1.0) as f32
+}
+
+fn handle_positions(
+    rect: Rect,
+    start: f64,
+    end: f64,
+    fade_in: f64,
+    fade_out: f64,
+    duration: f64,
+) -> [(Handle, Pos2); 4] {
+    let top = rect.top() + 6.0;
+    let bottom = rect.bottom() - 8.0;
+    [
+        (
+            Handle::Start,
+            egui::pos2(x_at_time(rect, start, duration), bottom),
+        ),
+        (
+            Handle::End,
+            egui::pos2(x_at_time(rect, end, duration), bottom),
+        ),
+        (
+            Handle::FadeIn,
+            egui::pos2(x_at_time(rect, (start + fade_in).min(end), duration), top),
+        ),
+        (
+            Handle::FadeOut,
+            egui::pos2(x_at_time(rect, (end - fade_out).max(start), duration), top),
+        ),
+    ]
+}
+
+fn handle_at(positions: [(Handle, Pos2); 4], pos: Pos2) -> Option<Handle> {
+    positions
+        .into_iter()
+        .filter_map(|(handle, center)| {
+            let distance = center.distance_sq(pos);
+            (distance <= 8.0_f32.powi(2)).then_some((handle, distance))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(handle, _)| handle)
+}
+
+fn apply_handle(a: &mut Annotation, handle: Handle, time: f64, duration: f64) {
+    match handle {
+        Handle::Start => a.set_start(time, duration),
+        Handle::End => a.set_end(time, duration),
+        Handle::FadeIn => {
+            a.effects.fade_in = (time - a.start_seconds).clamp(0.0, a.end_seconds - a.start_seconds)
+        }
+        Handle::FadeOut => {
+            a.effects.fade_out = (a.end_seconds - time).clamp(0.0, a.end_seconds - a.start_seconds)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +400,37 @@ mod tests {
         assert_eq!(time_at_x(rect, 320.0, 10.0), 5.0);
         assert_eq!(time_at_x(rect, 0.0, 10.0), 0.0);
         assert_eq!(time_at_x(rect, 900.0, 10.0), 10.0);
+    }
+
+    #[test]
+    fn timing_and_fade_points_remain_distinct_when_fades_are_zero() {
+        let rect = Rect::from_min_size(egui::pos2(100.0, 0.0), egui::vec2(400.0, 30.0));
+        let positions = handle_positions(rect, 2.0, 8.0, 0.0, 0.0, 10.0);
+        for (handle, center) in positions {
+            assert_eq!(handle_at(positions, center), Some(handle));
+        }
+        let positions = handle_positions(rect, 2.0, 8.0, 1.0, 1.5, 10.0);
+        assert_eq!(positions[2].1.x, x_at_time(rect, 3.0, 10.0));
+        assert_eq!(positions[3].1.x, x_at_time(rect, 6.5, 10.0));
+    }
+
+    #[test]
+    fn dragging_points_edits_timing_or_fade_without_inverting_interval() {
+        let mut a = Annotation::new(Kind::Rectangle, [0.0; 2], [10.0; 2], 10.0);
+        a.start_seconds = 2.0;
+        a.end_seconds = 8.0;
+        apply_handle(&mut a, Handle::Start, 9.0, 10.0);
+        assert_eq!(a.start_seconds, 7.999);
+        apply_handle(&mut a, Handle::Start, 2.0, 10.0);
+        apply_handle(&mut a, Handle::End, 6.0, 10.0);
+        assert_eq!(a.end_seconds, 6.0);
+        apply_handle(&mut a, Handle::FadeIn, 4.0, 10.0);
+        apply_handle(&mut a, Handle::FadeOut, 5.0, 10.0);
+        assert_eq!(a.effects.fade_in, 2.0);
+        assert_eq!(a.effects.fade_out, 1.0);
+        apply_handle(&mut a, Handle::FadeOut, 0.0, 10.0);
+        assert_eq!(a.effects.fade_out, 4.0);
+        apply_handle(&mut a, Handle::FadeIn, 10.0, 10.0);
+        assert_eq!(a.effects.fade_in, 4.0);
     }
 }

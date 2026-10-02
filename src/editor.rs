@@ -10,6 +10,7 @@ pub struct Editor {
     pub(crate) selected: Option<usize>,
     drag: Option<Drag>,
     rename: Option<RenameDraft>,
+    pub(crate) timeline_drag: Option<crate::timeline::TimelineDrag>,
 }
 struct RenameDraft {
     index: usize,
