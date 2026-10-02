@@ -195,6 +195,8 @@ at least a 1 ms interval (or the full duration for shorter videos).
 
 Select a timeline row to seek to its start, or click/drag the ruler or a track to
 seek to that time and pause. Edit Start/End in seconds or use the playhead buttons.
+The timeline stays at the bottom of the window; its track list uses only the
+height it needs (up to its scrolling limit), leaving the rest for the video.
 Intervals include their start but exclude their end, except at the video endpoint.
 Hidden annotations remain selectable in the timeline, not on the preview.
 Bring forward / Send backward move the selected annotation one layer at a time;

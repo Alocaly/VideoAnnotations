@@ -853,90 +853,19 @@ impl eframe::App for VideoApp {
                     self.act(|p| p.pause(true));
                 }
             }
-            ui.separator();
-            let size = egui::vec2(
-                ui.available_width(),
-                (ui.available_height() - 370.0).max(80.0),
-            );
-            self.video_view(ui, size, false);
-            ui.add_space(8.0);
-            if let Some(s) = &state {
-                ui.add_enabled_ui(s.loaded, |ui| {
-                    ui.horizontal(|ui| {
-                        if ui
-                            .button(if s.ended {
-                                "Replay"
-                            } else if s.paused {
-                                "Play"
-                            } else {
-                                "Pause"
-                            })
-                            .on_hover_text("Space")
-                            .clicked()
-                        {
-                            self.act(Player::toggle);
-                        }
-                        for (label, delta) in [("-5 s", -5.0), ("-1 s", -1.0)] {
-                            if ui.button(label).clicked() {
-                                self.act(|p| p.seek(s.position + delta));
-                            }
-                        }
-                        if ui
-                            .button("-1 frame")
-                            .on_hover_text("Ctrl+Left or ,")
-                            .clicked()
-                        {
-                            self.act(|p| p.step(false));
-                        }
-                        if ui
-                            .button("+1 frame")
-                            .on_hover_text("Ctrl+Right or .")
-                            .clicked()
-                        {
-                            self.act(|p| p.step(true));
-                        }
-                        for (label, delta) in [("+1 s", 1.0), ("+5 s", 5.0)] {
-                            if ui.button(label).clicked() {
-                                self.act(|p| p.seek(s.position + delta));
-                            }
-                        }
-                        ui.label(format!(
-                            "{} / {}",
-                            timecode(self.scrub.unwrap_or(s.position)),
-                            timecode(s.duration)
-                        ));
-                    });
-                    if let Some(position) = seek_slider(ui, &mut self.scrub, s.position, s.duration)
-                    {
-                        if !s.paused {
-                            self.act(|p| p.pause(true));
-                        }
-                        self.act(|p| p.seek(position));
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.checkbox(&mut self.muted, "Mute").changed() {
-                            let muted = self.muted;
-                            self.act(|p| p.mute(muted));
-                        }
-                        ui.spacing_mut().slider_width = 120.0;
-                        if ui
-                            .add(egui::Slider::new(&mut self.volume, 0.0..=100.0).text("Volume"))
-                            .changed()
-                        {
-                            let volume = self.volume;
-                            self.act(|p| p.volume(volume));
-                        }
-                    });
-                });
-            }
-            ui.separator();
             if let Some(project) = self.project.as_mut() {
-                let action = self.editor.timeline(
-                    ui,
-                    project,
-                    self.scrub
-                        .unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)),
-                );
+                let action = egui::Panel::bottom("annotation-timeline")
+                    .default_size(180.0)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        self.editor.timeline(
+                            ui,
+                            project,
+                            self.scrub
+                                .unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)),
+                        )
+                    })
+                    .inner;
                 if action.pause {
                     self.act(|p| p.pause(true));
                 }
@@ -944,6 +873,91 @@ impl eframe::App for VideoApp {
                     self.act(|p| p.seek(time));
                 }
             }
+            if let Some(s) = &state {
+                egui::Panel::bottom("player-controls")
+                    .default_size(100.0)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(s.loaded, |ui| {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .button(if s.ended {
+                                        "Replay"
+                                    } else if s.paused {
+                                        "Play"
+                                    } else {
+                                        "Pause"
+                                    })
+                                    .on_hover_text("Space")
+                                    .clicked()
+                                {
+                                    self.act(Player::toggle);
+                                }
+                                for (label, delta) in [("-5 s", -5.0), ("-1 s", -1.0)] {
+                                    if ui.button(label).clicked() {
+                                        self.act(|p| p.seek(s.position + delta));
+                                    }
+                                }
+                                if ui
+                                    .button("-1 frame")
+                                    .on_hover_text("Ctrl+Left or ,")
+                                    .clicked()
+                                {
+                                    self.act(|p| p.step(false));
+                                }
+                                if ui
+                                    .button("+1 frame")
+                                    .on_hover_text("Ctrl+Right or .")
+                                    .clicked()
+                                {
+                                    self.act(|p| p.step(true));
+                                }
+                                for (label, delta) in [("+1 s", 1.0), ("+5 s", 5.0)] {
+                                    if ui.button(label).clicked() {
+                                        self.act(|p| p.seek(s.position + delta));
+                                    }
+                                }
+                                ui.label(format!(
+                                    "{} / {}",
+                                    timecode(self.scrub.unwrap_or(s.position)),
+                                    timecode(s.duration)
+                                ));
+                            });
+                            if let Some(position) =
+                                seek_slider(ui, &mut self.scrub, s.position, s.duration)
+                            {
+                                if !s.paused {
+                                    self.act(|p| p.pause(true));
+                                }
+                                self.act(|p| p.seek(position));
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.checkbox(&mut self.muted, "Mute").changed() {
+                                    let muted = self.muted;
+                                    self.act(|p| p.mute(muted));
+                                }
+                                ui.spacing_mut().slider_width = 120.0;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut self.volume, 0.0..=100.0)
+                                            .text("Volume"),
+                                    )
+                                    .changed()
+                                {
+                                    let volume = self.volume;
+                                    self.act(|p| p.volume(volume));
+                                }
+                            });
+                        })
+                    });
+            }
+            ui.separator();
+            let available = ui.available_size();
+            self.video_view(
+                ui,
+                egui::vec2(available.x.max(1.0), available.y.max(1.0)),
+                false,
+            );
         });
         if let Some(project) = &self.project {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.text_edit_focused();
@@ -1443,6 +1457,36 @@ mod tests {
         );
         output.textures_delta.clear();
         assert!(!app.show_video_info);
+    }
+
+    #[test]
+    fn bottom_panel_tracks_content_height_without_gap() {
+        let ctx = egui::Context::default();
+        let mut heights = Vec::new();
+        for (frame, content_height) in [90.0, 90.0, 20.0, 20.0].into_iter().enumerate() {
+            let mut output = ctx.run_ui(input(vec![]), |ui| {
+                let bottom = ui.available_rect_before_wrap().bottom();
+                let panel = egui::Panel::bottom("layout-test")
+                    .default_size(90.0)
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), content_height),
+                            egui::Sense::hover(),
+                        );
+                    });
+                if frame == 1 || frame == 3 {
+                    assert!(
+                        (panel.response.rect.bottom() - bottom).abs() <= 1.0,
+                        "panel {:?}, available bottom {bottom}",
+                        panel.response.rect
+                    );
+                }
+                heights.push(panel.response.rect.height());
+            });
+            output.textures_delta.clear();
+        }
+        assert!(heights[3] < heights[1], "panel did not shrink: {heights:?}");
     }
 
     #[test]

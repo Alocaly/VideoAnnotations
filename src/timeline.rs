@@ -20,7 +20,6 @@ impl Editor {
     ) -> TimelineAction {
         let mut action = TimelineAction::default();
         let duration = project.video.duration;
-        ui.separator();
         ui.horizontal_wrapped(|ui| {
             ui.strong("Annotation timeline");
             ui.label("Add at playhead:");
@@ -147,8 +146,7 @@ impl Editor {
         egui::ScrollArea::vertical()
             .id_salt("annotation-tracks")
             .max_height(90.0)
-            .min_scrolled_height(90.0)
-            .auto_shrink([false, false])
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 if project.annotations.is_empty() {
                     ui.label("No annotations. Add one above or draw on the video.");
