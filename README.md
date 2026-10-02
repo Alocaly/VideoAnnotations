@@ -204,7 +204,8 @@ The selected annotation bar has four draggable points: the white points at its
 lower corners change its start and end, while the blue points along its upper
 edge set fade-in and fade-out durations. Other bars hide their points until
 selected. A single colored ramp on each side shows the fade profile. Hover a
-point to see its value; dragging a point pauses playback without seeking.
+point to see its value; dragging a point pauses playback without seeking. The
+time ruler and tracks leave room on the right for the scrollbar and end handles.
 The timeline stays at the bottom of the window. Drag its upper border to resize
 the timeline and video area; tracks scroll when the timeline is too short.
 Intervals include their start but exclude their end, except at the video endpoint.

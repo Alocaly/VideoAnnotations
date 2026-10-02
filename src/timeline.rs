@@ -11,6 +11,10 @@ pub struct TimelineAction {
     pub seek: Option<f64>,
 }
 
+// Keep the video endpoint and its drag handles clear of the floating scrollbar.
+const TIMELINE_RIGHT_MARGIN: f32 = 24.0;
+const HANDLE_EDGE_INSET: f32 = 8.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Handle {
     Start,
@@ -130,10 +134,11 @@ impl Editor {
         });
         ui.horizontal(|ui| {
             ui.add_sized([120.0, 20.0], egui::Label::new("Time (seconds)"));
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 20.0),
+            let (allocated, response) = ui.allocate_exact_size(
+                egui::vec2(timeline_width(ui.available_width()), 20.0),
                 egui::Sense::click_and_drag(),
             );
+            let rect = time_rect(allocated);
             for tick in 0..=4 {
                 let f = tick as f32 / 4.0;
                 let align = if tick == 0 {
@@ -185,10 +190,11 @@ impl Editor {
                                 self.select(project, index);
                                 action.seek = Some(start);
                             }
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 30.0),
+                            let (allocated, response) = ui.allocate_exact_size(
+                                egui::vec2(timeline_width(ui.available_width()), 30.0),
                                 egui::Sense::click_and_drag(),
                             );
+                            let rect = time_rect(allocated);
                             let p = ui.painter();
                             p.rect_filled(rect, 2.0, Color32::from_gray(35));
                             let x = |t: f64| x_at_time(rect, t, duration);
@@ -326,6 +332,18 @@ fn time_at_x(rect: Rect, x: f32, duration: f64) -> f64 {
     ((x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0) as f64 * duration
 }
 
+fn timeline_width(available: f32) -> f32 {
+    (available - TIMELINE_RIGHT_MARGIN).max(1.0)
+}
+
+fn time_rect(allocated: Rect) -> Rect {
+    let inset = HANDLE_EDGE_INSET.min((allocated.width() / 4.0).max(0.0));
+    Rect::from_min_max(
+        egui::pos2(allocated.left() + inset, allocated.top()),
+        egui::pos2(allocated.right() - inset, allocated.bottom()),
+    )
+}
+
 fn x_at_time(rect: Rect, time: f64, duration: f64) -> f32 {
     rect.left() + rect.width() * (time / duration.max(f64::EPSILON)).clamp(0.0, 1.0) as f32
 }
@@ -424,6 +442,21 @@ mod tests {
         assert_eq!(time_at_x(rect, 320.0, 10.0), 5.0);
         assert_eq!(time_at_x(rect, 0.0, 10.0), 0.0);
         assert_eq!(time_at_x(rect, 900.0, 10.0), 10.0);
+    }
+
+    #[test]
+    fn timeline_keeps_endpoint_handles_inside_track_and_away_from_scrollbar() {
+        let panel_right = 500.0;
+        let allocated = Rect::from_min_size(
+            egui::pos2(100.0, 0.0),
+            egui::vec2(timeline_width(panel_right - 100.0), 30.0),
+        );
+        let rect = time_rect(allocated);
+        let positions = handle_positions(rect, 0.0, 10.0, 0.0, 0.0, 10.0);
+        assert_eq!(positions[1].1.x, rect.right());
+        assert!(allocated.contains(positions[1].1));
+        assert!(panel_right - positions[1].1.x >= TIMELINE_RIGHT_MARGIN + HANDLE_EDGE_INSET);
+        assert_eq!(time_at_x(rect, positions[1].1.x, 10.0), 10.0);
     }
 
     #[test]
