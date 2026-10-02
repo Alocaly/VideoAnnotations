@@ -734,6 +734,9 @@ impl VideoApp {
         {
             paint_video_information(ui.painter(), rect, state);
         }
+        if state.as_ref().is_some_and(|s| s.seeking) {
+            paint_seeking_indicator(ui, rect);
+        }
         if response.double_clicked() && (fullscreen || self.editor.can_toggle_fullscreen()) {
             self.toggle_fullscreen();
         }
@@ -826,18 +829,11 @@ impl eframe::App for VideoApp {
                 ui.label("Open a local video or drop one into this window.");
             }
             let state = self.player.as_ref().map(|p| p.state.clone());
-            if let Some(s) = &state {
-                if !s.loaded && self.error.is_none() {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Opening video...");
-                    });
-                } else if s.seeking {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Seeking...");
-                    });
-                }
+            if state.as_ref().is_some_and(|s| !s.loaded) && self.error.is_none() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Opening video...");
+                });
             }
             if let Some(error) = &self.error {
                 ui.colored_label(egui::Color32::LIGHT_RED, error);
@@ -1056,6 +1052,46 @@ fn paint_video_information(painter: &egui::Painter, video_rect: egui::Rect, stat
     let painter = painter.with_clip_rect(video_rect);
     painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(180));
     painter.galley(rect.min + padding, text, egui::Color32::WHITE);
+}
+
+fn paint_seeking_indicator(ui: &mut egui::Ui, video_rect: egui::Rect) {
+    let text = ui.painter().layout_no_wrap(
+        "Seeking…".into(),
+        egui::FontId::proportional(13.0),
+        egui::Color32::WHITE,
+    );
+    let padding = egui::vec2(8.0, 6.0);
+    let spinner_size = 16.0;
+    let gap = 6.0;
+    let size = egui::vec2(
+        padding.x * 2.0 + spinner_size + gap + text.size().x,
+        padding.y * 2.0 + spinner_size.max(text.size().y),
+    );
+    if video_rect.width() < size.x + 16.0 || video_rect.height() < size.y + 16.0 {
+        return;
+    }
+    let rect = egui::Rect::from_min_size(
+        video_rect.right_bottom() - size - egui::vec2(8.0, 8.0),
+        size,
+    );
+    ui.painter().with_clip_rect(video_rect).rect_filled(
+        rect,
+        4.0,
+        egui::Color32::from_black_alpha(180),
+    );
+    let spinner_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.min.x + padding.x, rect.center().y - spinner_size / 2.0),
+        egui::vec2(spinner_size, spinner_size),
+    );
+    ui.place(spinner_rect, egui::Spinner::new().size(spinner_size));
+    ui.painter().with_clip_rect(video_rect).galley(
+        egui::pos2(
+            spinner_rect.right() + gap,
+            rect.center().y - text.size().y / 2.0,
+        ),
+        text,
+        egui::Color32::WHITE,
+    );
 }
 
 struct GifExportOptions {
@@ -1447,6 +1483,20 @@ mod tests {
             video_information_text(&state),
             "1920 × 1080\nVariable / unknown fps\nNo active audio output"
         );
+    }
+
+    #[test]
+    fn seeking_overlay_does_not_change_player_layout() {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(input(vec![]), |ui| {
+            let (video_rect, _) =
+                ui.allocate_exact_size(egui::vec2(400.0, 220.0), egui::Sense::hover());
+            let remaining = ui.available_rect_before_wrap();
+            paint_seeking_indicator(ui, video_rect);
+            assert_eq!(ui.available_rect_before_wrap(), remaining);
+        });
+        assert!(!output.shapes.is_empty());
+        output.textures_delta.clear();
     }
 
     #[test]

@@ -166,6 +166,8 @@ unsaved changes. Choosing **Export GIF** opens a settings dialog before the
 native save dialog.
 Resolution, frame rate, and audio-output status appear in the upper-right corner
 of the video preview; **Misc → Show video information** or Ctrl+I toggles them.
+The transient seeking indicator appears over the lower-right corner of the
+video, without moving or resizing the player.
 The full shortcut list is available from **Misc → Keyboard shortcuts…** instead
 of occupying space below the player.
 Keyboard shortcuts do not interfere with typing
