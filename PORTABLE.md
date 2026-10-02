@@ -42,6 +42,7 @@ MP4 and GIF exports are separate rendered files. GIF has no audio.
 | Shift + Left / Right | Back / forward 5 seconds |
 | Ctrl + Left / Right | Previous / next frame |
 | F11 | Video-only fullscreen |
+| Ctrl + I | Show / hide video information |
 | Esc | Exit fullscreen / cancel current gesture or selection |
 | M | Mute |
 | Delete | Delete selected annotation |

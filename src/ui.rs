@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use video_annotations::{
     document::{self, History},
     media::VideoInfo,
-    playback::Player,
+    playback::{PlaybackState, Player},
     project::Project,
 };
 
@@ -27,6 +27,7 @@ pub struct VideoApp {
     texture: Option<egui::TextureHandle>,
     error: Option<String>,
     fullscreen: bool,
+    show_video_info: bool,
     volume: f32,
     muted: bool,
     scrub: Option<f64>,
@@ -56,6 +57,7 @@ impl VideoApp {
             texture: None,
             error: None,
             fullscreen: false,
+            show_video_info: true,
             volume: 70.0,
             muted: false,
             scrub: None,
@@ -157,6 +159,21 @@ impl VideoApp {
                         width: self.gif_width,
                         fps: self.gif_fps,
                     });
+                }
+            });
+            ui.menu_button("Misc", |ui| {
+                if ui.button("Full screen    F11").clicked() {
+                    ui.close();
+                    self.toggle_fullscreen();
+                }
+                if ui
+                    .checkbox(
+                        &mut self.show_video_info,
+                        "Show video information    Ctrl+I",
+                    )
+                    .clicked()
+                {
+                    ui.close();
                 }
             });
             if ui
@@ -509,6 +526,9 @@ impl VideoApp {
         if ctx.text_edit_focused() {
             return;
         }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::I)) {
+            self.show_video_info = !self.show_video_info;
+        }
         if ctx.input_mut(|i| {
             i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
         }) || ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y))
@@ -610,11 +630,11 @@ impl VideoApp {
     fn video_view(&mut self, ui: &mut egui::Ui, size: egui::Vec2, fullscreen: bool) {
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
-        let state = self.player.as_ref().map(|p| &p.state);
+        let state = self.player.as_ref().map(|p| p.state.clone());
         let time = self
             .scrub
-            .unwrap_or_else(|| state.map_or(0.0, |s| s.position));
-        let editing = !fullscreen && state.is_none_or(|s| s.paused);
+            .unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position));
+        let editing = !fullscreen && state.as_ref().is_none_or(|s| s.paused);
         let mut pause = false;
         if let Some(texture) = &self.texture {
             let native = texture.size_vec2();
@@ -646,6 +666,11 @@ impl VideoApp {
         }
         if pause {
             self.act(|p| p.pause(true));
+        }
+        if self.show_video_info
+            && let Some(state) = state.as_ref().filter(|s| s.loaded)
+        {
+            paint_video_information(ui.painter(), rect, state);
         }
         if response.double_clicked() && (fullscreen || self.editor.can_toggle_fullscreen()) {
             self.toggle_fullscreen();
@@ -716,13 +741,11 @@ impl eframe::App for VideoApp {
             if self.project.is_none() { ui.label("Open a local video or drop one into this window."); }
             let state = self.player.as_ref().map(|p| p.state.clone());
             if let Some(s) = &state {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{} x {}  |  {}  |  {}", s.width, s.height,
-                        s.fps.map(|f| format!("{f:.3} fps")).unwrap_or_else(|| "Variable / unknown fps".into()),
-                        if s.audio_output.is_some() { "Audio enabled" } else { "No active audio output" }));
-                    if !s.loaded && self.error.is_none() { ui.spinner(); ui.label("Opening video..."); }
-                    else if s.seeking { ui.spinner(); ui.label("Seeking..."); }
-                });
+                if !s.loaded && self.error.is_none() {
+                    ui.horizontal(|ui| { ui.spinner(); ui.label("Opening video..."); });
+                } else if s.seeking {
+                    ui.horizontal(|ui| { ui.spinner(); ui.label("Seeking..."); });
+                }
             }
             if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
             if let Some(project) = self.project.as_mut() {
@@ -762,7 +785,7 @@ impl eframe::App for VideoApp {
                 });
             }
             ui.separator();
-            ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Esc: exit  |  M: mute");
+            ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Ctrl+I: video info  |  Esc: exit  |  M: mute");
             ui.small("Ctrl+S: save project  |  Ctrl+Shift+O: open project  |  Ctrl+Z / Ctrl+Y: undo / redo");
             if let Some(project) = self.project.as_mut() {
                 let action = self.editor.timeline(ui, project, self.scrub.unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)));
@@ -811,6 +834,38 @@ impl eframe::App for VideoApp {
 enum Pending {
     Open(PathBuf),
     Close,
+}
+
+fn video_information_text(state: &PlaybackState) -> String {
+    format!(
+        "{} × {}\n{}\n{}",
+        state.width,
+        state.height,
+        state
+            .fps
+            .map(|fps| format!("{fps:.3} fps"))
+            .unwrap_or_else(|| "Variable / unknown fps".into()),
+        if state.audio_output.is_some() {
+            "Audio enabled"
+        } else {
+            "No active audio output"
+        }
+    )
+}
+
+fn paint_video_information(painter: &egui::Painter, video_rect: egui::Rect, state: &PlaybackState) {
+    let text = painter.layout_no_wrap(
+        video_information_text(state),
+        egui::FontId::proportional(13.0),
+        egui::Color32::WHITE,
+    );
+    let padding = egui::vec2(8.0, 6.0);
+    let size = text.size() + padding * 2.0;
+    let origin = video_rect.right_top() + egui::vec2(-size.x - 8.0, 8.0);
+    let rect = egui::Rect::from_min_size(origin, size);
+    let painter = painter.with_clip_rect(video_rect);
+    painter.rect_filled(rect, 4.0, egui::Color32::from_black_alpha(180));
+    painter.galley(rect.min + padding, text, egui::Color32::WHITE);
 }
 
 struct GifExportOptions {
@@ -1149,6 +1204,7 @@ mod tests {
             texture: None,
             error: None,
             fullscreen: false,
+            show_video_info: true,
             volume: 70.0,
             muted: false,
             scrub: None,
@@ -1176,6 +1232,49 @@ mod tests {
         );
         app.project = None;
         assert_eq!(app.header_title(), "VideoAnnotations");
+    }
+
+    #[test]
+    fn video_information_shows_resolution_fps_and_audio_status() {
+        let state = PlaybackState {
+            width: 1920,
+            height: 1080,
+            fps: Some(29.97),
+            audio_output: Some("default".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            video_information_text(&state),
+            "1920 × 1080\n29.970 fps\nAudio enabled"
+        );
+        let state = PlaybackState {
+            fps: None,
+            audio_output: None,
+            ..state
+        };
+        assert_eq!(
+            video_information_text(&state),
+            "1920 × 1080\nVariable / unknown fps\nNo active audio output"
+        );
+    }
+
+    #[test]
+    fn ctrl_i_toggles_video_information() {
+        let mut app = app();
+        let ctx = app.context.clone();
+        assert!(app.show_video_info);
+        let mut output = ctx.run_ui(
+            input(vec![egui::Event::Key {
+                key: egui::Key::I,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::CTRL,
+            }]),
+            |ui| app.shortcuts(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert!(!app.show_video_info);
     }
 
     #[test]

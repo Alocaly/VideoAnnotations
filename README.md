@@ -147,6 +147,7 @@ when there are unsaved changes.
 | Open project | Ctrl+Shift+O |
 | Save project / Save as | Ctrl+S / Ctrl+Shift+S |
 | Undo / Redo annotation edit | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z |
+| Show / hide video information | Ctrl+I |
 | Play / pause / replay at end | Space |
 | Back / forward one second | Left / Right |
 | Back / forward five seconds | Shift+Left / Shift+Right |
@@ -158,10 +159,13 @@ when there are unsaved changes.
 The same navigation actions have buttons. Dragging the time slider seeks and
 updates the video continuously, then leaves playback paused at the chosen frame.
 The top bar groups opening and saving under **File**, MP4 and GIF exports under
-**Export**, and keeps Undo/Redo as buttons. It shows the project and source video
+**Export**, and fullscreen/video information under **Misc**. Undo/Redo remain
+buttons. It shows the project and source video
 filenames after VideoAnnotations; an asterisk beside the project name means
 unsaved changes. Choosing **Export GIF** opens a settings dialog before the
 native save dialog.
+Resolution, frame rate, and audio-output status appear in the upper-right corner
+of the video preview; **Misc → Show video information** or Ctrl+I toggles them.
 Keyboard shortcuts do not interfere with typing
 in numeric fields. Opening the file picker pauses the current video.
 Fullscreen hides the editor panels and timeline, fitting the video to the screen
