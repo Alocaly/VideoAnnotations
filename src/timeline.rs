@@ -199,41 +199,26 @@ impl Editor {
                                     rect.bottom() - 3.0,
                                 ),
                             );
-                            p.rect_filled(bar, 2.0, color.gamma_multiply(0.65));
                             let positions =
                                 handle_positions(rect, start, end, fade_in, fade_out, duration);
-                            let fade_color = Color32::from_black_alpha(110);
-                            if fade_in > 0.0 {
-                                p.add(egui::Shape::convex_polygon(
-                                    vec![
-                                        egui::pos2(x(start), bar.top()),
-                                        egui::pos2(x(start), bar.bottom()),
-                                        positions[2].1,
-                                    ],
-                                    fade_color,
-                                    Stroke::NONE,
-                                ));
-                                p.line_segment(
-                                    [egui::pos2(x(start), bar.bottom()), positions[2].1],
-                                    Stroke::new(1.5, Color32::WHITE),
-                                );
+                            let profile = fade_profile(start, end, fade_in, fade_out);
+                            let mut filled = Vec::with_capacity(profile.len() + 2);
+                            if profile.first().is_some_and(|&(_, alpha)| alpha > 0.0) {
+                                filled.push(egui::pos2(x(start), bar.bottom()));
                             }
-                            if fade_out > 0.0 {
-                                p.add(egui::Shape::convex_polygon(
-                                    vec![
-                                        positions[3].1,
-                                        egui::pos2(x(end), bar.top()),
-                                        egui::pos2(x(end), bar.bottom()),
-                                    ],
-                                    fade_color,
-                                    Stroke::NONE,
-                                ));
-                                p.line_segment(
-                                    [positions[3].1, egui::pos2(x(end), bar.bottom())],
-                                    Stroke::new(1.5, Color32::WHITE),
-                                );
+                            filled.extend(profile.iter().map(|&(t, alpha)| {
+                                egui::pos2(x(t), bar.bottom() - alpha as f32 * bar.height())
+                            }));
+                            if profile.last().is_some_and(|&(_, alpha)| alpha > 0.0) {
+                                filled.push(egui::pos2(x(end), bar.bottom()));
                             }
-                            if self.selected == Some(index) {
+                            p.add(egui::Shape::convex_polygon(
+                                filled,
+                                color.gamma_multiply(0.75),
+                                Stroke::NONE,
+                            ));
+                            let focused = self.selected == Some(index);
+                            if focused {
                                 p.rect_stroke(
                                     bar,
                                     2.0,
@@ -248,17 +233,23 @@ impl Editor {
                                 ],
                                 Stroke::new(1.5, Color32::LIGHT_RED),
                             );
-                            for (handle, center) in positions {
-                                let fill = match handle {
-                                    Handle::Start | Handle::End => Color32::WHITE,
-                                    Handle::FadeIn | Handle::FadeOut => Color32::LIGHT_BLUE,
-                                };
-                                p.circle_filled(center, 4.5, fill);
-                                p.circle_stroke(center, 4.5, Stroke::new(1.0, Color32::BLACK));
+                            if focused {
+                                for (handle, center) in positions {
+                                    let fill = match handle {
+                                        Handle::Start | Handle::End => Color32::WHITE,
+                                        Handle::FadeIn | Handle::FadeOut => Color32::LIGHT_BLUE,
+                                    };
+                                    p.circle_filled(center, 4.5, fill);
+                                    p.circle_stroke(center, 4.5, Stroke::new(1.0, Color32::BLACK));
+                                }
                             }
-                            let hovered = response
-                                .hover_pos()
-                                .and_then(|pos| handle_at(positions, pos));
+                            let hovered = focused
+                                .then(|| {
+                                    response
+                                        .hover_pos()
+                                        .and_then(|pos| handle_at(positions, pos))
+                                })
+                                .flatten();
                             if hovered.is_some()
                                 || self.timeline_drag.is_some_and(|drag| drag.index == index)
                             {
@@ -283,7 +274,9 @@ impl Editor {
                                     .input(|i| i.pointer.press_origin())
                                     .or_else(|| response.interact_pointer_pos())
                             {
-                                self.timeline_drag = handle_at(positions, pos)
+                                self.timeline_drag = focused
+                                    .then(|| handle_at(positions, pos))
+                                    .flatten()
                                     .map(|handle| TimelineDrag { index, handle });
                                 self.select(project, index);
                                 if self.timeline_drag.is_some() {
@@ -311,7 +304,7 @@ impl Editor {
                                 && let Some(pos) = response.interact_pointer_pos()
                             {
                                 self.select(project, index);
-                                if handle_at(positions, pos).is_none() {
+                                if !focused || handle_at(positions, pos).is_none() {
                                     action.seek = Some(time_at_x(rect, pos.x, duration));
                                 } else {
                                     action.pause = true;
@@ -335,6 +328,37 @@ fn time_at_x(rect: Rect, x: f32, duration: f64) -> f64 {
 
 fn x_at_time(rect: Rect, time: f64, duration: f64) -> f32 {
     rect.left() + rect.width() * (time / duration.max(f64::EPSILON)).clamp(0.0, 1.0) as f32
+}
+
+fn fade_profile(start: f64, end: f64, fade_in: f64, fade_out: f64) -> Vec<(f64, f64)> {
+    let mut times = vec![start, end];
+    if fade_in > 0.0 {
+        times.push((start + fade_in).min(end));
+    }
+    if fade_out > 0.0 {
+        times.push((end - fade_out).max(start));
+    }
+    if fade_in > 0.0 && fade_out > 0.0 {
+        times.push(start + (end - start) * fade_in / (fade_in + fade_out));
+    }
+    times.sort_by(f64::total_cmp);
+    times.dedup();
+    times
+        .into_iter()
+        .map(|t| {
+            let incoming = if fade_in > 0.0 {
+                ((t - start) / fade_in).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let outgoing = if fade_out > 0.0 {
+                ((end - t) / fade_out).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            (t, incoming.min(outgoing))
+        })
+        .collect()
 }
 
 fn handle_positions(
@@ -412,6 +436,22 @@ mod tests {
         let positions = handle_positions(rect, 2.0, 8.0, 1.0, 1.5, 10.0);
         assert_eq!(positions[2].1.x, x_at_time(rect, 3.0, 10.0));
         assert_eq!(positions[3].1.x, x_at_time(rect, 6.5, 10.0));
+    }
+
+    #[test]
+    fn fade_profile_has_one_ramp_per_side_without_overlay_triangles() {
+        assert_eq!(
+            fade_profile(2.0, 8.0, 1.0, 2.0),
+            vec![(2.0, 0.0), (3.0, 1.0), (4.0, 1.0), (6.0, 1.0), (8.0, 0.0)]
+        );
+        assert_eq!(
+            fade_profile(2.0, 8.0, 4.0, 4.0),
+            vec![(2.0, 0.0), (4.0, 0.5), (5.0, 0.75), (6.0, 0.5), (8.0, 0.0)]
+        );
+        assert_eq!(
+            fade_profile(2.0, 8.0, 0.0, 0.0),
+            vec![(2.0, 1.0), (8.0, 1.0)]
+        );
     }
 
     #[test]

@@ -200,9 +200,10 @@ at least a 1 ms interval (or the full duration for shorter videos).
 
 Select a timeline row to seek to its start, or click/drag the ruler or a track to
 seek to that time and pause. Edit Start/End in seconds or use the playhead buttons.
-Each annotation bar has four draggable points: the white points at its lower
-corners change its start and end, while the blue points along its upper edge
-set fade-in and fade-out durations. Triangles show the fade regions. Hover a
+The selected annotation bar has four draggable points: the white points at its
+lower corners change its start and end, while the blue points along its upper
+edge set fade-in and fade-out durations. Other bars hide their points until
+selected. A single colored ramp on each side shows the fade profile. Hover a
 point to see its value; dragging a point pauses playback without seeking.
 The timeline stays at the bottom of the window. Drag its upper border to resize
 the timeline and video area; tracks scroll when the timeline is too short.
