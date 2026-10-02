@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 use video_annotations::{
-    annotations::{Annotation, Kind},
+    annotations::{Annotation, Effect, Kind},
     project::Project,
 };
 
@@ -124,106 +124,168 @@ impl Editor {
             .id_salt("annotation-properties-scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let name = self
-                    .selected
-                    .and_then(|i| project.annotations.get(i).map(|a| a.display_name(i)))
-                    .unwrap_or_else(|| "No annotation selected".into());
-                let button_width = 30.0;
-                let gap = ui.spacing().item_spacing.x;
-                let name_width = (ui.available_width() - 2.0 * (button_width + gap)).max(1.0);
-                ui.allocate_space(egui::vec2(button_width, 24.0));
-                ui.add_sized(
-                    [name_width, 24.0],
-                    egui::Label::new(egui::RichText::new(name).strong())
-                        .truncate()
-                        .halign(egui::Align::Center),
-                );
-                let rename_button = ui
-                    .add_enabled(
-                        self.selected.is_some(),
-                        egui::Button::new("").min_size(egui::vec2(button_width, 24.0)),
-                    )
-                    .on_hover_text("Rename annotation");
-                paint_pencil_icon(ui, &rename_button);
-                if rename_button.clicked() && let Some(index) = self.selected {
-                    self.rename = Some(RenameDraft {
-                        index,
-                        name: project.annotations[index].display_name(index),
-                        error: None,
-                    });
-                    ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("rename-annotation-input")));
-                    pause = true;
-                }
-            });
-            ui.separator();
-            if let Some(a) = self.selected.and_then(|i| project.annotations.get_mut(i)) {
-                ui.strong("Appearance");
                 ui.horizontal(|ui| {
-                    ui.label("Color");
-                    pause |= ui.color_edit_button_srgba_unmultiplied(&mut a.color).changed();
-                });
-                if a.kind == Kind::Text {
-                    ui.horizontal(|ui| {
-                        ui.label("Font size");
-                        pause |= ui.add(egui::DragValue::new(&mut a.font_size).range(6.0..=300.0).speed(1.0).suffix(" px")).changed();
-                    });
-                    ui.label("Text content");
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut a.text)
-                            .id(egui::Id::new(("annotation-text", self.selected)))
-                            .desired_rows(3)
-                            .desired_width(ui.available_width()),
+                    let name = self
+                        .selected
+                        .and_then(|i| project.annotations.get(i).map(|a| a.display_name(i)))
+                        .unwrap_or_else(|| "No annotation selected".into());
+                    let button_width = 30.0;
+                    let gap = ui.spacing().item_spacing.x;
+                    let name_width = (ui.available_width() - 2.0 * (button_width + gap)).max(1.0);
+                    ui.allocate_space(egui::vec2(button_width, 24.0));
+                    ui.add_sized(
+                        [name_width, 24.0],
+                        egui::Label::new(egui::RichText::new(name).strong())
+                            .truncate()
+                            .halign(egui::Align::Center),
                     );
-                    pause |= response.has_focus();
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label("Thickness");
-                        pause |= ui.add(egui::DragValue::new(&mut a.thickness).range(1.0..=60.0).speed(0.5).suffix(" px")).changed();
-                    });
-                }
+                    let rename_button = ui
+                        .add_enabled(
+                            self.selected.is_some(),
+                            egui::Button::new("").min_size(egui::vec2(button_width, 24.0)),
+                        )
+                        .on_hover_text("Rename annotation");
+                    paint_pencil_icon(ui, &rename_button);
+                    if rename_button.clicked()
+                        && let Some(index) = self.selected
+                    {
+                        self.rename = Some(RenameDraft {
+                            index,
+                            name: project.annotations[index].display_name(index),
+                            error: None,
+                        });
+                        ui.ctx().memory_mut(|m| {
+                            m.request_focus(egui::Id::new("rename-annotation-input"))
+                        });
+                        pause = true;
+                    }
+                });
                 ui.separator();
-                egui::CollapsingHeader::new("Effects")
-                    .id_salt(("effects", self.selected))
-                    .default_open(true)
-                    .show(ui, |ui| {
+                if let Some(a) = self.selected.and_then(|i| project.annotations.get_mut(i)) {
+                    ui.strong("Appearance");
+                    ui.horizontal(|ui| {
+                        ui.label("Color");
+                        pause |= ui
+                            .color_edit_button_srgba_unmultiplied(&mut a.color)
+                            .changed();
+                    });
+                    if a.kind == Kind::Text {
                         ui.horizontal(|ui| {
-                            ui.label("Fade in");
-                            pause |= ui.add(egui::DragValue::new(&mut a.effects.fade_in).range(0.0..=86400.0).speed(0.05).suffix(" s")).changed();
+                            ui.label("Font size");
+                            pause |= ui
+                                .add(
+                                    egui::DragValue::new(&mut a.font_size)
+                                        .range(6.0..=300.0)
+                                        .speed(1.0)
+                                        .suffix(" px"),
+                                )
+                                .changed();
                         });
+                        ui.label("Text content");
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut a.text)
+                                .id(egui::Id::new(("annotation-text", self.selected)))
+                                .desired_rows(3)
+                                .desired_width(ui.available_width()),
+                        );
+                        pause |= response.has_focus();
+                    } else {
                         ui.horizontal(|ui| {
-                            ui.label("Fade out");
-                            pause |= ui.add(egui::DragValue::new(&mut a.effects.fade_out).range(0.0..=86400.0).speed(0.05).suffix(" s")).changed();
+                            ui.label("Thickness");
+                            pause |= ui
+                                .add(
+                                    egui::DragValue::new(&mut a.thickness)
+                                        .range(1.0..=60.0)
+                                        .speed(0.5)
+                                        .suffix(" px"),
+                                )
+                                .changed();
                         });
-                        ui.label("Glow color pulse").on_hover_text("Color brightens or darkens and returns to its original shade every 2 seconds; 0 disables it.");
-                        pause |= ui.add(egui::DragValue::new(&mut a.effects.glow).range(0.0..=30.0).speed(0.5).suffix(" / 30")).changed();
-                        for (axis, limit, label) in [(0, project.video.width, "Move by X"), (1, project.video.height, "Move by Y")] {
-                            ui.horizontal(|ui| {
-                                ui.label(label);
-                                pause |= ui.add(egui::DragValue::new(&mut a.effects.movement[axis]).range(-(limit as f32)..=limit as f32).speed(1.0).suffix(" px")).changed();
-                            });
-                        }
-                        ui.small("Linear motion over the annotation lifetime; edges are clipped.");
-                        if matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
-                            let mut enabled = a.effects.outline_period > 0.0;
-                            if ui.checkbox(&mut enabled, "Traveling outline").changed() {
-                                a.effects.outline_period = if enabled { 2.0 } else { 0.0 };
+                    }
+                    ui.separator();
+                    egui::CollapsingHeader::new("Effects")
+                        .id_salt(("effects", self.selected))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let mut selected = match a.effects.effect {
+                                Effect::None => 0,
+                                Effect::Glow { .. } => 1,
+                                Effect::Orbit { .. } => 2,
+                            };
+                            let previous = selected;
+                            egui::ComboBox::from_id_salt(("annotation-effect", self.selected))
+                                .selected_text(["None", "Glow", "Orbiting ball"][selected])
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut selected, 0, "None");
+                                    ui.selectable_value(&mut selected, 1, "Glow");
+                                    if matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
+                                        ui.selectable_value(&mut selected, 2, "Orbiting ball");
+                                    }
+                                });
+                            if selected != previous {
+                                a.effects.effect = match selected {
+                                    1 => Effect::Glow {
+                                        color: [80, 220, 255],
+                                        pulse_hz: 0.5,
+                                    },
+                                    2 => Effect::Orbit {
+                                        color: [80, 220, 255],
+                                        period: 2.0,
+                                    },
+                                    _ => Effect::None,
+                                };
                                 pause = true;
                             }
-                            if enabled {
-                                pause |= ui.add(egui::DragValue::new(&mut a.effects.outline_period).range(0.1..=60.0).speed(0.1).suffix(" s / turn")).changed();
+                            match &mut a.effects.effect {
+                                Effect::Glow { color, pulse_hz } => {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Pulse color");
+                                        pause |= ui.color_edit_button_srgb(color).changed();
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Pulse speed");
+                                        pause |= ui
+                                            .add(
+                                                egui::DragValue::new(pulse_hz)
+                                                    .range(0.05..=10.0)
+                                                    .speed(0.05)
+                                                    .suffix(" Hz"),
+                                            )
+                                            .changed();
+                                    });
+                                    ui.small("One pulse is a full color cycle and return.");
+                                }
+                                Effect::Orbit { color, period } => {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Ball color");
+                                        pause |= ui.color_edit_button_srgb(color).changed();
+                                    });
+                                    ui.horizontal(|ui| {
+                                        ui.label("Turn duration");
+                                        pause |= ui
+                                            .add(
+                                                egui::DragValue::new(period)
+                                                    .range(0.1..=60.0)
+                                                    .speed(0.1)
+                                                    .suffix(" s"),
+                                            )
+                                            .changed();
+                                    });
+                                }
+                                Effect::None => {}
                             }
-                        }
-                    });
-                ui.separator();
-                if ui.button("Delete annotation").clicked() {
-                    self.delete(project);
-                    pause = true;
+                        });
+                    ui.separator();
+                    if ui.button("Delete annotation").clicked() {
+                        self.delete(project);
+                        pause = true;
+                    }
+                } else {
+                    ui.label(
+                        "Select an annotation on the video or timeline to edit its properties.",
+                    );
                 }
-            } else {
-                ui.label("Select an annotation on the video or timeline to edit its properties.");
-            }
-        });
+            });
         pause
     }
 
@@ -672,12 +734,15 @@ mod tests {
     }
 
     #[test]
-    fn picking_follows_animated_displacement() {
+    fn glow_keeps_picking_on_stored_geometry() {
         let mut project = project();
-        project.annotations[0].effects.movement = [200.0, 0.0];
+        project.annotations[0].effects.effect = Effect::Glow {
+            color: [0, 255, 0],
+            pulse_hz: 0.5,
+        };
         assert_eq!(pick(&project, [50.0, 50.0], 0.0, 0.0), Some(0));
-        assert_eq!(pick(&project, [50.0, 50.0], 0.0, 5.0), None);
-        assert_eq!(pick(&project, [150.0, 50.0], 0.0, 5.0), Some(0));
+        assert_eq!(pick(&project, [50.0, 50.0], 0.0, 5.0), Some(0));
+        assert_eq!(pick(&project, [150.0, 50.0], 0.0, 5.0), None);
         assert_eq!(project.annotations[0].a, [10.0, 10.0]);
     }
 

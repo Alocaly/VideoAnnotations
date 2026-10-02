@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 use video_annotations::{
-    annotations::{Annotation, Kind},
+    annotations::{Annotation, Effect, Kind},
     export,
     media::{self, VideoInfo},
     playback::Player,
@@ -248,9 +248,10 @@ fn animated_720p_export_timing() {
     let mut project = Project::new(media::MediaBackend::default().probe(&source).unwrap());
     let mut annotation = Annotation::new(Kind::Ellipse, [100.0, 100.0], [500.0, 400.0], 1.0);
     annotation.effects.fade_in = 0.2;
-    annotation.effects.movement = [200.0, 0.0];
-    annotation.effects.glow = 12.0;
-    annotation.effects.outline_period = 1.0;
+    annotation.effects.effect = Effect::Orbit {
+        color: [80, 220, 255],
+        period: 1.0,
+    };
     project.annotations.push(annotation);
     let start = Instant::now();
     let mut previous = 0.0;

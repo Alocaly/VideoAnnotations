@@ -1,5 +1,8 @@
 //! Versioned project files and bounded, gesture-level annotation history.
-use crate::{annotations::Annotation, project::Project};
+use crate::{
+    annotations::{Annotation, Effect, Effects, Kind},
+    project::Project,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -37,14 +40,17 @@ pub fn validate(project: &Project) -> Result<(), String> {
             || !e.fade_out.is_finite()
             || !(0.0..=86400.0).contains(&e.fade_in)
             || !(0.0..=86400.0).contains(&e.fade_out)
-            || !e.glow.is_finite()
-            || !(0.0..=30.0).contains(&e.glow)
-            || !e.outline_period.is_finite()
-            || !(0.0..=60.0).contains(&e.outline_period)
-            || (e.outline_period > 0.0 && e.outline_period < 0.1)
-            || e.movement.iter().any(|n| !n.is_finite())
-            || e.movement[0].abs() > v.width as f32
-            || e.movement[1].abs() > v.height as f32
+            || match e.effect {
+                Effect::None => false,
+                Effect::Glow { pulse_hz, .. } => {
+                    !pulse_hz.is_finite() || !(0.05..=10.0).contains(&pulse_hz)
+                }
+                Effect::Orbit { period, .. } => {
+                    !period.is_finite()
+                        || !(0.1..=60.0).contains(&period)
+                        || !matches!(a.kind, Kind::Rectangle | Kind::Ellipse)
+                }
+            }
         {
             return Err("Invalid annotation effects.".into());
         }
@@ -88,11 +94,17 @@ pub fn load(path: &Path) -> Result<Project, String> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err("Project exceeds the 8 MiB limit.".into());
     }
-    let mut document: Document =
+    let mut json: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid project file: {e}"))?;
-    if !matches!(document.version, 1..=3) {
-        return Err(format!("Unsupported project version: {}", document.version));
+    let version = json["version"].as_u64().ok_or("Invalid project version")?;
+    if !matches!(version, 1..=4) {
+        return Err(format!("Unsupported project version: {version}"));
     }
+    if version < 4 {
+        migrate_effects(&mut json)?;
+    }
+    let mut document: Document =
+        serde_json::from_value(json).map_err(|e| format!("Invalid project file: {e}"))?;
     validate(&document.project)?;
     if document.project.video.path.is_relative() {
         document.project.video.path = absolute(path)?
@@ -115,7 +127,7 @@ pub fn save(project: &Project, path: &Path) -> Result<(), String> {
     let mut stored = project.clone();
     stored.video.path = source.strip_prefix(parent).unwrap_or(&source).to_path_buf();
     let bytes = serde_json::to_vec_pretty(&Document {
-        version: 3,
+        version: 4,
         project: stored,
     })
     .map_err(|e| e.to_string())?;
@@ -134,6 +146,75 @@ pub fn save(project: &Project, path: &Path) -> Result<(), String> {
     temporary
         .persist(&path)
         .map_err(|e| format!("Cannot replace project: {}", e.error))?;
+    Ok(())
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct LegacyEffects {
+    fade_in: f64,
+    fade_out: f64,
+    movement: [f32; 2],
+    glow: f32,
+    outline_period: f64,
+}
+
+fn migrate_effects(json: &mut serde_json::Value) -> Result<(), String> {
+    let width = json["project"]["video"]["width"].as_u64().unwrap_or(0) as f32;
+    let height = json["project"]["video"]["height"].as_u64().unwrap_or(0) as f32;
+    if let Some(annotations) = json["project"]["annotations"].as_array_mut() {
+        for annotation in annotations {
+            let Some(stored) = annotation.get("effects") else {
+                continue;
+            };
+            let old: LegacyEffects = serde_json::from_value(stored.clone())
+                .map_err(|e| format!("Invalid legacy effects: {e}"))?;
+            if !old.glow.is_finite()
+                || !(0.0..=30.0).contains(&old.glow)
+                || !old.outline_period.is_finite()
+                || !(0.0..=60.0).contains(&old.outline_period)
+                || (old.outline_period > 0.0 && old.outline_period < 0.1)
+                || old.movement.iter().any(|v| !v.is_finite())
+                || old.movement[0].abs() > width
+                || old.movement[1].abs() > height
+            {
+                return Err("Invalid legacy annotation effects.".into());
+            }
+            let color: [u8; 4] =
+                serde_json::from_value(annotation["color"].clone()).map_err(|e| e.to_string())?;
+            let kind: Kind =
+                serde_json::from_value(annotation["kind"].clone()).map_err(|e| e.to_string())?;
+            let effect = if old.glow > 0.0 {
+                let luminance =
+                    0.2126 * color[0] as f32 + 0.7152 * color[1] as f32 + 0.0722 * color[2] as f32;
+                let target = if luminance >= 0.75 * 255.0 {
+                    0.0
+                } else {
+                    255.0
+                };
+                let mix = old.glow / 30.0 * 0.55;
+                Effect::Glow {
+                    color: std::array::from_fn(|i| {
+                        (color[i] as f32 * (1.0 - mix) + target * mix).round() as u8
+                    }),
+                    pulse_hz: 0.5,
+                }
+            } else if old.outline_period > 0.0 && matches!(kind, Kind::Rectangle | Kind::Ellipse) {
+                Effect::Orbit {
+                    color: [color[0], color[1], color[2]],
+                    period: old.outline_period,
+                }
+            } else {
+                Effect::None
+            };
+            annotation["effects"] = serde_json::to_value(Effects {
+                fade_in: old.fade_in,
+                fade_out: old.fade_out,
+                effect,
+            })
+            .map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -228,15 +309,20 @@ mod tests {
         let mut p = fixture(dir.path());
         p.annotations[0].effects.fade_in = 1.5;
         p.annotations[0].effects.fade_out = 0.5;
-        p.annotations[0].effects.glow = 10.0;
+        p.annotations[0].effects.effect = Effect::Glow {
+            color: [255, 100, 30],
+            pulse_hz: 1.5,
+        };
         p.annotations[0].name = "Intro label".into();
-        p.annotations[0].effects.movement = [100.0, -30.0];
-        p.annotations[1].effects.outline_period = 2.0;
+        p.annotations[1].effects.effect = Effect::Orbit {
+            color: [0, 255, 100],
+            period: 2.0,
+        };
         save(&p, &path).unwrap();
         assert_eq!(load(&path).unwrap(), p);
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(json["version"], 3);
+        assert_eq!(json["version"], 4);
         assert_eq!(json["project"]["video"]["path"], "source.mp4");
         p.annotations.reverse();
         p.annotations[0].start_seconds = 1.0;
@@ -266,12 +352,19 @@ mod tests {
         .unwrap();
         for annotation in v2["project"]["annotations"].as_array_mut().unwrap() {
             annotation.as_object_mut().unwrap().remove("name");
+            annotation["effects"]
+                .as_object_mut()
+                .unwrap()
+                .remove("effect");
         }
         std::fs::write(&path, serde_json::to_vec(&v2).unwrap()).unwrap();
         assert_eq!(load(&path).unwrap(), p);
-        p.annotations[0].effects.glow = f32::NAN;
+        p.annotations[0].effects.effect = Effect::Glow {
+            color: [255; 3],
+            pulse_hz: f64::NAN,
+        };
         assert!(validate(&p).is_err());
-        p.annotations[0].effects.glow = 0.0;
+        p.annotations[0].effects.effect = Effect::None;
         p.annotations[0].effects.fade_in = -1.0;
         assert!(validate(&p).is_err());
         p.annotations[0].effects.fade_in = 0.0;
@@ -279,6 +372,46 @@ mod tests {
         assert!(validate(&p).is_err());
         p.annotations[0].name = "A".repeat(129);
         assert!(validate(&p).is_err());
+    }
+    #[test]
+    fn legacy_effects_migrate_to_one_effect_and_discard_motion() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = fixture(dir.path());
+        let mut json = serde_json::to_value(Document {
+            version: 3,
+            project: original.clone(),
+        })
+        .unwrap();
+        for a in json["project"]["annotations"].as_array_mut().unwrap() {
+            a["effects"] = serde_json::json!({"fade_in": 1.0, "fade_out": 0.5, "movement": [100.0, 20.0], "glow": 0.0, "outline_period": 0.0});
+        }
+        json["project"]["annotations"][0]["effects"]["glow"] = 30.into();
+        json["project"]["annotations"][0]["effects"]["outline_period"] = 2.into();
+        json["project"]["annotations"][1]["effects"]["outline_period"] = 3.into();
+        let path = dir.path().join("old.vannot");
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        let mut loaded = load(&path).unwrap();
+        assert_eq!(loaded.annotations[0].a, original.annotations[0].a);
+        assert_eq!(loaded.annotations[0].effects.fade_in, 1.0);
+        assert!(matches!(
+            loaded.annotations[0].effects.effect,
+            Effect::Glow { pulse_hz: 0.5, .. }
+        ));
+        assert_eq!(
+            loaded.annotations[1].effects.effect,
+            Effect::Orbit {
+                color: [20, 30, 40],
+                period: 3.0
+            }
+        );
+        loaded.annotations[0].effects.effect = Effect::Orbit {
+            color: [255; 3],
+            period: 2.0,
+        };
+        assert!(
+            validate(&loaded).is_err(),
+            "Text cannot have an orbiting ball"
+        );
     }
     #[test]
     fn moved_project_resolves_relative_source_from_new_location() {

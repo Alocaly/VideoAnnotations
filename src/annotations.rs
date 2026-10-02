@@ -42,12 +42,22 @@ pub struct Annotation {
 pub struct Effects {
     pub fade_in: f64,
     pub fade_out: f64,
-    /// Linear displacement from the stored geometry over the active interval.
-    pub movement: [f32; 2],
-    /// Color-pulse intensity (0–30). The saved field name is retained for v2 projects.
-    pub glow: f32,
-    /// Zero disables the traveling outline; otherwise seconds per revolution.
-    pub outline_period: f64,
+    pub effect: Effect,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", deny_unknown_fields)]
+pub enum Effect {
+    #[default]
+    None,
+    Glow {
+        color: [u8; 3],
+        pulse_hz: f64,
+    },
+    Orbit {
+        color: [u8; 3],
+        period: f64,
+    },
 }
 
 impl Annotation {
@@ -62,9 +72,7 @@ impl Annotation {
     pub fn animated(&self) -> bool {
         self.effects.fade_in > 0.0
             || self.effects.fade_out > 0.0
-            || self.effects.movement != [0.0; 2]
-            || self.effects.glow > 0.0
-            || self.effects.outline_period > 0.0
+            || self.effects.effect != Effect::None
     }
 
     /// Pure evaluation: seeking and exporting never change the saved geometry.
@@ -72,11 +80,6 @@ impl Annotation {
         let mut a = self.clone();
         let lifetime = (self.end_seconds - self.start_seconds).max(f64::EPSILON);
         let elapsed = (time - self.start_seconds).clamp(0.0, lifetime);
-        let progress = (elapsed / lifetime) as f32;
-        for axis in 0..2 {
-            a.a[axis] += self.effects.movement[axis] * progress;
-            a.b[axis] += self.effects.movement[axis] * progress;
-        }
         let fade_in = if self.effects.fade_in > 0.0 {
             (elapsed / self.effects.fade_in).min(1.0)
         } else {
@@ -88,20 +91,12 @@ impl Annotation {
             1.0
         };
         a.color[3] = (self.color[3] as f64 * fade_in.min(fade_out)).round() as u8;
-        if self.effects.glow > 0.0 {
-            // Smooth two-second cycle: original color at 0/2 s, peak at 1 s.
-            // Bright colors pulse darker so even white has a visible variation.
-            let luminance = (0.2126 * self.color[0] as f32
-                + 0.7152 * self.color[1] as f32
-                + 0.0722 * self.color[2] as f32)
-                / 255.0;
-            let target = if luminance >= 0.75 { 0.0 } else { 255.0 };
-            let phase = std::f64::consts::PI * elapsed;
-            let pulse = ((1.0 - phase.cos()) * 0.5) as f32;
-            let mix = (self.effects.glow / 30.0).clamp(0.0, 1.0) * 0.55 * pulse;
-            for channel in 0..3 {
+        if let Effect::Glow { color, pulse_hz } = self.effects.effect {
+            let phase = std::f64::consts::TAU * elapsed * pulse_hz;
+            let mix = (1.0 - phase.cos()) * 0.5;
+            for (channel, target) in color.into_iter().enumerate() {
                 a.color[channel] =
-                    (self.color[channel] as f32 * (1.0 - mix) + target * mix).round() as u8;
+                    (self.color[channel] as f64 * (1.0 - mix) + target as f64 * mix).round() as u8;
             }
         }
         a
@@ -221,10 +216,9 @@ mod tests {
         a.start_seconds = 1.0;
         a.effects.fade_in = 1.0;
         a.effects.fade_out = 1.0;
-        a.effects.movement = [60.0, -12.0];
         assert_eq!(a.evaluated(1.0).color[3], 0);
         assert_eq!(a.evaluated(1.5).color[3], 128);
-        assert_eq!(a.evaluated(2.5).a, [40.0, 14.0]);
+        assert_eq!(a.evaluated(2.5).a, a.a);
         assert_eq!(a.evaluated(2.5).color[3], 255);
         assert_eq!(a.evaluated(3.5).color[3], 128);
         assert_eq!(a.evaluated(4.0).color[3], 0);
@@ -235,24 +229,33 @@ mod tests {
     }
     #[test]
     fn glow_pulses_dark_and_light_colors_without_changing_alpha_or_geometry() {
-        for (base, brighter) in [([30, 60, 90, 170], true), ([245, 245, 245, 170], false)] {
+        for (base, target) in [
+            ([30, 60, 90, 170], [240, 100, 170]),
+            ([245, 245, 245, 170], [20, 80, 100]),
+        ] {
             let mut a = Annotation::new(Kind::Ellipse, [10.0, 20.0], [50.0, 60.0], 4.0);
             a.color = base;
-            a.effects.glow = 30.0;
+            a.effects.effect = Effect::Glow {
+                color: target,
+                pulse_hz: 0.5,
+            };
             assert!(a.animated());
             assert_eq!(a.evaluated(0.0).color, base);
             let peak = a.evaluated(1.0);
             let halfway = a.evaluated(0.5);
             assert_eq!(peak.color[3], base[3]);
             assert_eq!((peak.a, peak.b), (a.a, a.b));
-            assert_eq!(peak.color[0] > base[0], brighter);
+            assert_eq!(peak.color[..3], target);
             assert!(halfway.color[0] != base[0] && halfway.color[0] != peak.color[0]);
             assert_eq!(a.evaluated(2.0).color, base);
-            a.effects.glow = 15.0;
-            let softer = a.evaluated(1.0);
-            assert!(softer.color[0].abs_diff(base[0]) < peak.color[0].abs_diff(base[0]));
+            a.effects.effect = Effect::Glow {
+                color: target,
+                pulse_hz: 1.0,
+            };
+            assert_eq!(a.evaluated(0.5).color, peak.color);
+            assert_eq!(a.evaluated(1.0).color, base);
             assert_eq!(a.color, base);
-            a.effects.glow = 0.0;
+            a.effects.effect = Effect::None;
             assert!(!a.animated());
             assert_eq!(a.evaluated(1.0).color, base);
         }

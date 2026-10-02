@@ -7,7 +7,7 @@ A Rust desktop application for annotating a single video per project, currently 
 - Video playback with audio, fullscreen, and keyboard/button navigation by one frame, one second, or five seconds in either direction.
 - Text, rectangles, ellipses, and arrows, with editable appearance and placement.
 - A timeline controlling annotation start and end times and stacking order.
-- Annotation animations, including fades, movement, and glow.
+- Annotation animations, including timeline fades, glow, and an orbiting ball.
 - Save and reopen annotation projects.
 - Export annotated videos, including MP4 and GIF.
 - An English-language interface.
@@ -31,7 +31,7 @@ Projects can be saved and reopened as `.vannot` files, with source-video relinki
 when the original path is missing. Annotation edits support undo and redo.
 Export MP4 burns the annotations into a new H.264 video with AAC source audio,
 progress reporting, and cancellation.
-Annotations support fades, linear movement, glow, and a traveling outline.
+Annotations support timeline fades and one optional effect: Glow or an orbiting ball.
 GIF export includes maximum-width and frame-rate controls.
 
 The initial target is Windows. The UI uses egui/eframe; persistent playback uses
@@ -246,32 +246,30 @@ field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo butto
 for project history. Playback, selection, file operations, and source relinking
 are not undoable, and history is not stored in the project file.
 
-Projects now save as format version 3, including annotation names and effects.
-Version 1 and 2 projects still open; missing names receive generated labels and
-version 1 effects remain disabled. Older app versions cannot open newly saved
-version 3 projects; keep a copy if you need to use an older executable.
+Projects now save as format version 4, with a single optional effect per annotation.
+Version 1–3 projects still open. Their fades are preserved and movement is removed;
+old Glow settings become a two-color pulse, and a traveling outline becomes an
+orbiting ball. When both were enabled, Glow takes priority. Missing names receive
+generated labels. Older app versions cannot open newly saved version 4 projects;
+keep a copy if you need to use an older executable.
 
 ## Annotation effects
 
-Select an annotation, then expand **Effects** below its style controls:
+Select an annotation, then use the **Effects** dropdown below its style controls.
+Only one effect can be active:
 
-- **Fade in / Fade out**: seconds from the start / before the end. Zero disables
-  that fade. Overlapping fades use the lower opacity, so short annotations may
-  never become fully opaque.
-- **Move by X / Y**: total linear displacement in video pixels over the annotation
-  lifetime. The stored box is the starting position; movement beyond the video
-  is clipped. Seeking evaluates the same effect as continuous playback.
-- **Glow color pulse**: smoothly shifts the annotation color toward a lighter shade,
-  or toward a darker shade when its color is already very light. The 2-second
-  cycle returns to the original color; intensity 0–30, with zero disabling it.
-  It does not add a halo or change the annotation's transparency/size.
-- **Traveling outline** (rectangles/ellipses): a bright quarter-contour segment
-  over a dim outline, with seconds per revolution (0.1–60).
+- **None**: keeps the annotation's normal appearance.
+- **Glow**: oscillates smoothly between the annotation color and **Pulse color**.
+  **Pulse speed** is in Hz (0.05–10); 0.5 Hz gives a full cycle every two seconds.
+  Color reaches the second shade halfway through the cycle and then returns.
+- **Orbiting ball** (rectangles/ellipses): a filled ball in **Ball color** travels
+  clockwise along the contour, keeping the whole original shape visible.
+  **Turn duration** controls seconds per revolution (0.1–60). Ball size follows
+  annotation thickness; video edges clip it.
 
-Effects compose and are included in save, undo/redo, fullscreen, MP4, and GIF.
-Older version-2 projects still open, but their saved Glow value now controls this
-color animation instead of the previous static halo. Keep a copy if that old
-appearance matters.
+Set fades with the timeline points. They remain independent of the chosen effect;
+overlapping fades use the lower opacity. Movement is currently disabled.
+Effects are included in save, undo/redo, fullscreen, MP4, and GIF.
 An annotation with fade-in is invisible at its exact start; move the playhead
 forward to see it. Its selection handles remain available when paused.
 

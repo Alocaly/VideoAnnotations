@@ -1,5 +1,5 @@
 //! Shared annotation painter, plus an offline rasterizer for egui's triangle meshes.
-use crate::annotations::{Annotation, Kind};
+use crate::annotations::{Annotation, Effect, Kind};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,51 +15,46 @@ pub fn paint_at(
     if a.color[3] == 0 {
         return;
     }
-    if a.effects.outline_period > 0.0 && matches!(a.kind, Kind::Rectangle | Kind::Ellipse) {
-        let mut dim = a.clone();
-        dim.color[3] = (a.color[3] as f32 * 0.25) as u8;
-        paint(p, &dim, viewport, extent);
-        let phase = ((time - a.start_seconds).max(0.0) / a.effects.outline_period).fract() as f32;
-        let (min, max) = a.bounds();
-        let points = (0..=64)
-            .map(|i| {
-                let t = (phase + i as f32 / 256.0).fract();
-                let point = if a.kind == Kind::Ellipse {
-                    let angle = t * std::f32::consts::TAU;
-                    [
-                        (min[0] + max[0]) * 0.5 + angle.cos() * (max[0] - min[0]) * 0.5,
-                        (min[1] + max[1]) * 0.5 + angle.sin() * (max[1] - min[1]) * 0.5,
-                    ]
-                } else {
-                    let w = max[0] - min[0];
-                    let h = max[1] - min[1];
-                    let d = t * 2.0 * (w + h);
-                    if d < w {
-                        [min[0] + d, min[1]]
-                    } else if d < w + h {
-                        [max[0], min[1] + d - w]
-                    } else if d < 2.0 * w + h {
-                        [max[0] - (d - w - h), max[1]]
-                    } else {
-                        [min[0], max[1] - (d - 2.0 * w - h)]
-                    }
-                };
-                viewport.min
-                    + Vec2::new(
-                        point[0] / extent[0] * viewport.width(),
-                        point[1] / extent[1] * viewport.height(),
-                    )
-            })
-            .collect();
-        p.add(egui::Shape::line(
-            points,
-            Stroke::new(
-                a.thickness * viewport.width() / extent[0],
-                Color32::from_rgba_unmultiplied(a.color[0], a.color[1], a.color[2], a.color[3]),
-            ),
-        ));
+    paint(p, &a, viewport, extent);
+    if let Effect::Orbit { color, period } = a.effects.effect
+        && matches!(a.kind, Kind::Rectangle | Kind::Ellipse)
+    {
+        let phase = ((time - a.start_seconds).max(0.0) / period).fract() as f32;
+        let point = orbit_point(&a, phase);
+        let center = viewport.min
+            + Vec2::new(
+                point[0] / extent[0] * viewport.width(),
+                point[1] / extent[1] * viewport.height(),
+            );
+        p.circle_filled(
+            center,
+            (a.thickness * 1.5).max(4.0) * viewport.width() / extent[0],
+            Color32::from_rgba_unmultiplied(color[0], color[1], color[2], a.color[3]),
+        );
+    }
+}
+
+fn orbit_point(a: &Annotation, phase: f32) -> [f32; 2] {
+    let (min, max) = a.bounds();
+    if a.kind == Kind::Ellipse {
+        let angle = phase * std::f32::consts::TAU;
+        [
+            (min[0] + max[0]) * 0.5 + angle.cos() * (max[0] - min[0]) * 0.5,
+            (min[1] + max[1]) * 0.5 + angle.sin() * (max[1] - min[1]) * 0.5,
+        ]
     } else {
-        paint(p, &a, viewport, extent);
+        let w = max[0] - min[0];
+        let h = max[1] - min[1];
+        let d = phase * 2.0 * (w + h);
+        if d < w {
+            [min[0] + d, min[1]]
+        } else if d < w + h {
+            [max[0], min[1] + d - w]
+        } else if d < 2.0 * w + h {
+            [max[0] - (d - w - h), max[1]]
+        } else {
+            [min[0], max[1] - (d - 2.0 * w - h)]
+        }
     }
 }
 
@@ -318,7 +313,7 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 mod tests {
     use super::*;
     #[test]
-    fn animated_scene_handles_empty_frames_movement_fades_glow_and_outline() {
+    fn animated_scene_handles_fades_glow_and_colored_orbiting_ball() {
         let cancel = AtomicBool::new(false);
         assert!(
             rasterize_scene(&[], [160, 100], 0.0, 2.0, &cancel)
@@ -328,13 +323,15 @@ mod tests {
         );
         let mut a = Annotation::new(Kind::Rectangle, [20.0, 20.0], [80.0, 70.0], 2.0);
         a.effects.fade_in = 1.0;
-        a.effects.movement = [40.0, 0.0];
         let first = rasterize_scene(&[a.clone()], [160, 100], 0.0, 2.0, &cancel).unwrap();
         assert!(first.pixels().all(|p| p[3] == 0));
         let middle = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
         assert_eq!(middle.get_pixel(50, 21)[3], 255);
-        assert_eq!(middle.get_pixel(25, 21)[3], 0);
-        a.effects.glow = 30.0;
+        assert_eq!(middle.get_pixel(25, 21)[3], 255);
+        a.effects.effect = Effect::Glow {
+            color: [50, 100, 240],
+            pulse_hz: 0.5,
+        };
         let pulsed = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
         assert_eq!(pulsed.get_pixel(60, 21)[3], middle.get_pixel(60, 21)[3]);
         assert_ne!(
@@ -342,12 +339,22 @@ mod tests {
             middle.get_pixel(60, 21).0[..3]
         );
         assert_eq!(
-            pulsed.get_pixel(30, 21)[3],
+            pulsed.get_pixel(30, 12)[3],
             0,
             "Color pulse must not add a halo"
         );
         a.effects = Default::default();
-        a.effects.outline_period = 1.0;
+        a.effects.effect = Effect::Orbit {
+            color: [0, 255, 0],
+            period: 1.0,
+        };
+        let orbit = rasterize_scene(&[a.clone()], [160, 100], 0.0, 2.0, &cancel).unwrap();
+        assert_eq!(orbit.get_pixel(20, 20).0, [0, 255, 0, 255]);
+        assert_eq!(
+            orbit.get_pixel(50, 21)[3],
+            255,
+            "Contour stays fully visible"
+        );
         assert_ne!(
             rasterize_scene(&[a.clone()], [160, 100], 0.0, 2.0, &cancel).unwrap(),
             rasterize_scene(&[a], [160, 100], 0.5, 2.0, &cancel).unwrap()

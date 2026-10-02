@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 use video_annotations::{
-    annotations::{Annotation, Kind},
+    annotations::{Annotation, Effect, Kind},
     export,
     media::MediaBackend,
     project::Project,
@@ -255,15 +255,14 @@ fn animated_mp4_and_gif_respect_effects_size_rate_and_cancellation() {
     a.thickness = 10.0;
     a.effects.fade_in = 1.0;
     a.effects.fade_out = 0.5;
-    a.effects.movement = [80.0, 0.0];
     project.annotations.push(a);
     let mp4 = dir.path().join("animated.mp4");
     export::export(&project, &mp4, &AtomicBool::new(false), |_, _| {}).unwrap();
     assert!(pixel(&mp4, 0.0, 25, 24)[0] < 15);
-    let faded = pixel(&mp4, 0.5, 45, 24)[0];
+    let faded = pixel(&mp4, 0.5, 25, 24)[0];
     assert!((80..180).contains(&faded), "{faded}");
-    assert!(pixel(&mp4, 1.2, 75, 24)[0] > 180);
-    assert!(pixel(&mp4, 1.2, 25, 24)[0] < 15);
+    assert!(pixel(&mp4, 1.2, 25, 24)[0] > 180);
+    assert!(pixel(&mp4, 1.2, 75, 24)[0] < 15);
     let gif = dir.path().join("animated é.gif");
     let format = export::Format::Gif { width: 80, fps: 10 };
     assert_eq!(project.video.duration, 2.0, "Unexpected fixture duration");
@@ -288,7 +287,7 @@ fn animated_mp4_and_gif_respect_effects_size_rate_and_cancellation() {
     assert_eq!(streams[0]["height"], 50);
     assert_eq!(streams[0]["nb_read_frames"], "20", "{json}");
     assert_eq!(streams[0]["r_frame_rate"], "10/1");
-    let last_red = pixel_with_width(&gif, 1.9, 50, 12, 80)[0];
+    let last_red = pixel_with_width(&gif, 1.9, 12, 12, 80)[0];
     assert!(
         (20..80).contains(&last_red),
         "Last GIF frame should show the final fade sample, got {last_red}"
@@ -361,6 +360,55 @@ fn static_gif_without_annotations_and_palette_cancellation() {
 
 #[test]
 #[ignore = "requires FFmpeg and ffprobe"]
+fn orbiting_ball_color_and_path_survive_mp4_and_gif_export() {
+    let dir = tempfile::tempdir().unwrap();
+    for kind in [Kind::Rectangle, Kind::Ellipse] {
+        let source = dir.path().join(format!("{kind:?}-source.mp4"));
+        let mut project = fixture(&source, false);
+        let mut a = Annotation::new(kind, [20.0, 20.0], [100.0, 70.0], 2.0);
+        a.color = [255, 0, 0, 255];
+        a.thickness = 6.0;
+        a.effects.effect = Effect::Orbit {
+            color: [0, 180, 255],
+            period: 2.0,
+        };
+        project.annotations.push(a);
+        let (start, opposite) = if kind == Kind::Rectangle {
+            ([20, 20], [100, 70])
+        } else {
+            ([100, 45], [20, 45])
+        };
+        for (format, extension, width) in [
+            (export::Format::Mp4, "mp4", 160),
+            (export::Format::Gif { width: 80, fps: 10 }, "gif", 80),
+        ] {
+            let out = dir.path().join(format!("{kind:?}.{extension}"));
+            export::export_with_format(&project, &out, format, &AtomicBool::new(false), |_, _| {})
+                .unwrap();
+            let at = |t, point: [usize; 2]| {
+                pixel_with_width(
+                    &out,
+                    t,
+                    point[0] * width / 160,
+                    point[1] * width / 160,
+                    width,
+                )
+            };
+            assert!(at(0.0, start)[2] > 150, "Ball starts in its own blue color");
+            assert!(
+                at(1.0, opposite)[2] > 150,
+                "Ball reaches the opposite contour point"
+            );
+            assert!(
+                at(1.0, start)[2] < 80,
+                "Ball moves away from its starting point"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
 fn glow_only_is_time_varying_in_mp4_and_gif() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source.mp4");
@@ -368,7 +416,10 @@ fn glow_only_is_time_varying_in_mp4_and_gif() {
     let mut annotation = Annotation::new(Kind::Rectangle, [20.0, 20.0], [100.0, 70.0], 2.0);
     annotation.color = [30, 60, 90, 255];
     annotation.thickness = 10.0;
-    annotation.effects.glow = 30.0;
+    annotation.effects.effect = Effect::Glow {
+        color: [200, 220, 240],
+        pulse_hz: 0.5,
+    };
     assert!(annotation.animated());
     project.annotations.push(annotation);
 
