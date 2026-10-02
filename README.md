@@ -181,13 +181,15 @@ double-click returns to the editor.
 Choose a shape tool and drag on the video; choose Text and click to add a text
 box. Use Select to move an annotation and its blue handles to resize it. Arrows
 have two endpoint handles. Text-box resizing changes wrapping/clipping; Font size
-changes the lettering. The selection menu also reaches covered annotations.
+changes the lettering. The timeline also reaches covered annotations.
 Color (including opacity), thickness, text content, font size, and effects are
 editable in the Properties panel to the right of the video. Delete removes the
 selection; Esc cancels an unfinished gesture. Delete and player shortcuts do
 not interfere with text entry.
-To edit text, select its annotation (on the preview, in the timeline, or in the
-selection menu), then edit the **Text content** field in Properties.
+The selected annotation's name is centered at the top of Properties. Click ✎
+to rename it in a dialog; its new name also appears in the timeline. To edit
+the visible text of a text annotation, select it on the preview or timeline,
+then edit the separate **Text content** field in Properties.
 Focusing that field pauses playback. Selection bounds and resize handles appear
 only when paused in the editor, never during playback or video-only fullscreen.
 
@@ -209,8 +211,10 @@ or shift intervals. The whole video fits the ruler (no timeline zoom yet).
 ## Project files
 
 Use Save to create a `.vannot` JSON file containing the video reference, geometry,
-text, colors, sizes, timing, and layer order. Open it through Open project,
-drag-and-drop, or `cargo run -- "Projects/example.vannot"`. The video itself is
+names, text, colors, sizes, timing, and layer order. Older projects without
+annotation names display generated names such as "Arrow 01". Open a project
+through Open project, drag-and-drop, or `cargo run -- "Projects/example.vannot"`.
+The video itself is
 never modified. Store local projects in `Projects/` (ignored by Git), or beside
 the source video to make its saved path relative. Sources outside the project
 folder retain absolute paths, which may reveal local folder names when shared.
@@ -221,16 +225,17 @@ This checks metadata, not video identity. A failed or canceled opening leaves th
 current project intact. Save writes through a temporary sibling file before
 replacing the destination. An asterisk marks unsaved changes.
 
-Undo/redo covers annotation creation/deletion, geometry, style, text, timing, and
-layer order, retaining at most 100 full annotation snapshots for the current
-session. Mouse gestures are grouped; text edits group until focus leaves the
+Undo/redo covers annotation creation/deletion, names, geometry, style, text,
+timing, and layer order. History retains at most 100 annotation snapshots for
+the current session. Mouse gestures are grouped; text edits group until focus leaves the
 field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo buttons
 for project history. Playback, selection, file operations, and source relinking
 are not undoable, and history is not stored in the project file.
 
-Projects now save as format version 2, including effects. Version 1 projects still
-open with effects disabled. Older app versions cannot open newly saved version 2
-projects; keep a copy if you need to use an older executable.
+Projects now save as format version 3, including annotation names and effects.
+Version 1 and 2 projects still open; missing names receive generated labels and
+version 1 effects remain disabled. Older app versions cannot open newly saved
+version 3 projects; keep a copy if you need to use an older executable.
 
 ## Annotation effects
 

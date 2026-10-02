@@ -23,6 +23,9 @@ pub struct Annotation {
     pub start_seconds: f64,
     pub end_seconds: f64,
     pub kind: Kind,
+    /// Empty in older projects; the UI then displays a generated kind/number label.
+    #[serde(default)]
+    pub name: String,
     /// Opposite box corners, or directed arrow endpoints.
     pub a: [f32; 2],
     pub b: [f32; 2],
@@ -48,6 +51,14 @@ pub struct Effects {
 }
 
 impl Annotation {
+    pub fn display_name(&self, index: usize) -> String {
+        if self.name.is_empty() {
+            format!("{} {:02}", self.kind.label(), index + 1)
+        } else {
+            self.name.clone()
+        }
+    }
+
     pub fn animated(&self) -> bool {
         self.effects.fade_in > 0.0
             || self.effects.fade_out > 0.0
@@ -135,6 +146,7 @@ impl Annotation {
     pub fn new(kind: Kind, a: [f32; 2], b: [f32; 2], duration: f64) -> Self {
         Self {
             kind,
+            name: String::new(),
             a,
             b,
             start_seconds: 0.0,
@@ -195,6 +207,14 @@ fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn custom_names_override_legacy_type_and_number_labels() {
+        let mut annotation = Annotation::new(Kind::Arrow, [0.0, 0.0], [20.0, 20.0], 2.0);
+        assert_eq!(annotation.display_name(0), "Arrow 01");
+        assert_eq!(annotation.display_name(11), "Arrow 12");
+        annotation.name = "Opening arrow".into();
+        assert_eq!(annotation.display_name(11), "Opening arrow");
+    }
     #[test]
     fn effects_evaluate_deterministically_without_mutating_geometry() {
         let mut a = Annotation::new(Kind::Text, [10.0, 20.0], [50.0, 60.0], 4.0);

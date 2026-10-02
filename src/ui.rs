@@ -752,9 +752,15 @@ impl eframe::App for VideoApp {
         {
             self.show_shortcuts_dialog = false;
         }
+        if self.editor.renaming()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.editor.dismiss_rename();
+        }
         if ctx.input(|i| i.viewport().close_requested()) {
             self.gif_dialog = None;
             self.show_shortcuts_dialog = false;
+            self.editor.dismiss_rename();
         }
         if ctx.input(|i| i.viewport().close_requested()) && self.export.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -772,6 +778,7 @@ impl eframe::App for VideoApp {
             && self.export.is_none()
             && self.gif_dialog.is_none()
             && !self.show_shortcuts_dialog
+            && !self.editor.renaming()
         {
             self.shortcuts(&ctx);
         }
@@ -780,6 +787,7 @@ impl eframe::App for VideoApp {
             && self.loading.is_none()
             && self.gif_dialog.is_none()
             && !self.show_shortcuts_dialog
+            && !self.editor.renaming()
             && let Some(path) = ctx.input(|i| {
                 i.raw
                     .dropped_files
@@ -821,7 +829,7 @@ impl eframe::App for VideoApp {
                     "Opening source video… Current project is kept until validation succeeds.",
                 );
             }
-            if self.pending.is_some() || self.loading.is_some() {
+            if self.pending.is_some() || self.loading.is_some() || self.editor.renaming() {
                 ui.disable();
             }
             self.top_bar(ui);
@@ -967,6 +975,11 @@ impl eframe::App for VideoApp {
         if let Some(project) = &self.project {
             let editing = ctx.input(|i| i.pointer.any_down()) || ctx.text_edit_focused();
             self.history.observe(&project.annotations, editing);
+        }
+        if let Some(project) = self.project.as_mut()
+            && self.editor.rename_dialog(&ctx, project)
+        {
+            self.act(|p| p.pause(true));
         }
         self.gif_export_dialog(&ctx);
         self.shortcuts_dialog(&ctx);

@@ -57,6 +57,7 @@ Text field in the Properties panel to the right of the video. Expand Effects for
 fades, movement, glow, and the traveling outline. Glow now pulses the annotation
 color rather than drawing a halo. With fade-in enabled, seek past the annotation's start
 to see it. See README.md for full instructions and limitations.
+Use the ✎ button beside the selected annotation's name in Properties to rename it.
 
 ## Diagnostics and limits
 

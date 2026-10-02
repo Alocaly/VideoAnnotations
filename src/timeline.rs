@@ -43,7 +43,7 @@ impl Editor {
         ui.horizontal_wrapped(|ui| {
             if let Some(index) = self.selected.filter(|i| *i < project.annotations.len()) {
                 let a = &mut project.annotations[index];
-                ui.label(format!("{}: {}", index + 1, a.kind.label()));
+                ui.label(a.display_name(index));
                 ui.label("Start");
                 let mut start = a.start_seconds;
                 if ui
@@ -158,7 +158,7 @@ impl Editor {
                             let start = a.start_seconds;
                             let end = a.end_seconds;
                             let color = Color32::from_rgb(a.color[0], a.color[1], a.color[2]);
-                            let label = format!("{}: {}", index + 1, a.kind.label());
+                            let label = a.display_name(index);
                             if ui
                                 .add_sized(
                                     [120.0, 22.0],

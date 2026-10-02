@@ -57,6 +57,9 @@ pub fn validate(project: &Project) -> Result<(), String> {
             || !(1.0..=60.0).contains(&a.thickness)
             || !a.font_size.is_finite()
             || !(6.0..=300.0).contains(&a.font_size)
+            || a.name.len() > 128
+            || (!a.name.is_empty() && a.name.trim().is_empty())
+            || a.name.chars().any(char::is_control)
             || a.text.len() > 65536
         {
             return Err("Invalid annotation timing, style, or text length.".into());
@@ -87,7 +90,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
     }
     let mut document: Document =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid project file: {e}"))?;
-    if !matches!(document.version, 1 | 2) {
+    if !matches!(document.version, 1..=3) {
         return Err(format!("Unsupported project version: {}", document.version));
     }
     validate(&document.project)?;
@@ -112,7 +115,7 @@ pub fn save(project: &Project, path: &Path) -> Result<(), String> {
     let mut stored = project.clone();
     stored.video.path = source.strip_prefix(parent).unwrap_or(&source).to_path_buf();
     let bytes = serde_json::to_vec_pretty(&Document {
-        version: 2,
+        version: 3,
         project: stored,
     })
     .map_err(|e| e.to_string())?;
@@ -226,12 +229,14 @@ mod tests {
         p.annotations[0].effects.fade_in = 1.5;
         p.annotations[0].effects.fade_out = 0.5;
         p.annotations[0].effects.glow = 10.0;
+        p.annotations[0].name = "Intro label".into();
         p.annotations[0].effects.movement = [100.0, -30.0];
         p.annotations[1].effects.outline_period = 2.0;
         save(&p, &path).unwrap();
         assert_eq!(load(&path).unwrap(), p);
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(json["version"], 3);
         assert_eq!(json["project"]["video"]["path"], "source.mp4");
         p.annotations.reverse();
         p.annotations[0].start_seconds = 1.0;
@@ -250,13 +255,29 @@ mod tests {
         .unwrap();
         for a in json["project"]["annotations"].as_array_mut().unwrap() {
             a.as_object_mut().unwrap().remove("effects");
+            a.as_object_mut().unwrap().remove("name");
         }
         std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(load(&path).unwrap(), p);
+        let mut v2 = serde_json::to_value(Document {
+            version: 2,
+            project: p.clone(),
+        })
+        .unwrap();
+        for annotation in v2["project"]["annotations"].as_array_mut().unwrap() {
+            annotation.as_object_mut().unwrap().remove("name");
+        }
+        std::fs::write(&path, serde_json::to_vec(&v2).unwrap()).unwrap();
         assert_eq!(load(&path).unwrap(), p);
         p.annotations[0].effects.glow = f32::NAN;
         assert!(validate(&p).is_err());
         p.annotations[0].effects.glow = 0.0;
         p.annotations[0].effects.fade_in = -1.0;
+        assert!(validate(&p).is_err());
+        p.annotations[0].effects.fade_in = 0.0;
+        p.annotations[0].name = "   ".into();
+        assert!(validate(&p).is_err());
+        p.annotations[0].name = "A".repeat(129);
         assert!(validate(&p).is_err());
     }
     #[test]
@@ -328,6 +349,16 @@ mod tests {
         h.observe(&moved, false);
         assert!(!h.can_redo());
         assert_eq!(h.undo().unwrap(), p.annotations);
+    }
+    #[test]
+    fn annotation_rename_is_undoable() {
+        let original = fixture(Path::new("."));
+        let mut history = History::new(&original.annotations);
+        let mut renamed = original.annotations.clone();
+        renamed[0].name = "Opening title".into();
+        history.observe(&renamed, false);
+        assert_eq!(history.undo().unwrap(), original.annotations);
+        assert_eq!(history.redo().unwrap(), renamed);
     }
     #[test]
     fn cancellation_makes_no_history_and_snapshot_count_is_bounded() {

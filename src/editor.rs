@@ -9,6 +9,12 @@ pub struct Editor {
     tool: Option<Kind>,
     pub(crate) selected: Option<usize>,
     drag: Option<Drag>,
+    rename: Option<RenameDraft>,
+}
+struct RenameDraft {
+    index: usize,
+    name: String,
+    error: Option<String>,
 }
 enum Drag {
     Create {
@@ -77,6 +83,14 @@ impl Editor {
     pub fn can_toggle_fullscreen(&self) -> bool {
         self.tool.is_none() && self.selected.is_none() && self.drag.is_none()
     }
+
+    pub fn renaming(&self) -> bool {
+        self.rename.is_some()
+    }
+
+    pub fn dismiss_rename(&mut self) {
+        self.rename = None;
+    }
     pub fn tools(&mut self, ui: &mut egui::Ui) -> bool {
         let mut pause = false;
         ui.horizontal_wrapped(|ui| {
@@ -109,30 +123,36 @@ impl Editor {
             .id_salt("annotation-properties-scroll")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-            ui.label("Annotation");
-            egui::ComboBox::from_id_salt("annotation-selection")
-                .width(ui.available_width())
-                .selected_text(
-                    self.selected
-                        .and_then(|i| project.annotations.get(i))
-                        .map(|a| a.kind.label())
-                        .unwrap_or("No selection"),
-                )
-                .show_ui(ui, |ui| {
-                    for (i, a) in project.annotations.iter().enumerate() {
-                        if ui
-                            .selectable_label(
-                                self.selected == Some(i),
-                                format!("{}: {}", i + 1, a.kind.label()),
-                            )
-                            .clicked()
-                        {
-                            self.selected = Some(i);
-                            self.tool = None;
-                            pause = true;
-                        }
-                    }
-                });
+            ui.horizontal(|ui| {
+                let name = self
+                    .selected
+                    .and_then(|i| project.annotations.get(i).map(|a| a.display_name(i)))
+                    .unwrap_or_else(|| "No annotation selected".into());
+                let button_width = 30.0;
+                let gap = ui.spacing().item_spacing.x;
+                let name_width = (ui.available_width() - 2.0 * (button_width + gap)).max(1.0);
+                ui.allocate_space(egui::vec2(button_width, 24.0));
+                ui.add_sized(
+                    [name_width, 24.0],
+                    egui::Label::new(egui::RichText::new(name).strong())
+                        .truncate()
+                        .halign(egui::Align::Center),
+                );
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("✎").min_size(egui::vec2(button_width, 24.0)))
+                    .on_hover_text("Rename annotation")
+                    .clicked()
+                    && let Some(index) = self.selected
+                {
+                    self.rename = Some(RenameDraft {
+                        index,
+                        name: project.annotations[index].display_name(index),
+                        error: None,
+                    });
+                    ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("rename-annotation-input")));
+                    pause = true;
+                }
+            });
             ui.separator();
             if let Some(a) = self.selected.and_then(|i| project.annotations.get_mut(i)) {
                 ui.strong("Appearance");
@@ -202,6 +222,53 @@ impl Editor {
             }
         });
         pause
+    }
+
+    pub fn rename_dialog(&mut self, ctx: &egui::Context, project: &mut Project) -> bool {
+        let Some(draft) = self.rename.as_mut() else {
+            return false;
+        };
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Modal::new(egui::Id::new("rename-annotation")).show(ctx, |ui| {
+            ui.heading("Rename annotation");
+            ui.label("Name");
+            ui.add(
+                egui::TextEdit::singleline(&mut draft.name)
+                    .id(egui::Id::new("rename-annotation-input"))
+                    .desired_width(320.0),
+            );
+            if let Some(error) = &draft.error {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
+            ui.horizontal(|ui| {
+                confirm =
+                    ui.button("Rename").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter));
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if cancel {
+            self.rename = None;
+            return false;
+        }
+        if !confirm {
+            return false;
+        }
+        let draft = self.rename.as_mut().unwrap();
+        match normalize_annotation_name(&draft.name) {
+            Ok(name) => {
+                let index = draft.index;
+                let name = name.to_owned();
+                self.rename = None;
+                if let Some(annotation) = project.annotations.get_mut(index) {
+                    let changed = annotation.name != name;
+                    annotation.name = name;
+                    return changed;
+                }
+            }
+            Err(error) => draft.error = Some(error),
+        }
+        false
     }
 
     fn delete(&mut self, project: &mut Project) {
@@ -436,6 +503,19 @@ impl Editor {
     }
 }
 
+fn normalize_annotation_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        Err("Enter a name for the annotation.".into())
+    } else if name.len() > 128 {
+        Err("Annotation names must be at most 128 bytes long.".into())
+    } else if name.chars().any(char::is_control) {
+        Err("Annotation names cannot contain control characters.".into())
+    } else {
+        Ok(name)
+    }
+}
+
 fn pick(project: &Project, p: [f32; 2], tolerance: f32, time: f64) -> Option<usize> {
     project.annotations.iter().rposition(|a| {
         a.visible_at(time, project.video.duration) && a.evaluated(time).hit(p, tolerance)
@@ -460,6 +540,42 @@ fn valid(a: &Annotation, scale: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_dialog_commits_trimmed_name_and_rejects_blank_name() {
+        assert!(normalize_annotation_name("  ").is_err());
+        assert!(normalize_annotation_name(&"x".repeat(129)).is_err());
+        let ctx = egui::Context::default();
+        let mut project = project();
+        let mut editor = Editor {
+            selected: Some(0),
+            rename: Some(RenameDraft {
+                index: 0,
+                name: "  Opening rectangle  ".into(),
+                error: None,
+            }),
+            ..Default::default()
+        };
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 600.0))),
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        let mut renamed = false;
+        let mut output = ctx.run_ui(input, |ui| {
+            renamed = editor.rename_dialog(ui.ctx(), &mut project);
+        });
+        output.textures_delta.clear();
+        assert!(renamed);
+        assert_eq!(project.annotations[0].name, "Opening rectangle");
+        assert!(!editor.renaming());
+    }
 
     #[test]
     fn text_editor_retains_focus_when_status_widgets_change() {
