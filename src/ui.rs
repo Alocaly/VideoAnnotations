@@ -11,6 +11,7 @@ pub struct VideoApp {
     gif_width: u32,
     gif_fps: u32,
     gif_dialog: Option<GifExportOptions>,
+    show_shortcuts_dialog: bool,
     export: Option<video_annotations::export::Job>,
     export_progress: f32,
     export_message: Option<String>,
@@ -41,6 +42,7 @@ impl VideoApp {
             gif_width: 640,
             gif_fps: 15,
             gif_dialog: None,
+            show_shortcuts_dialog: false,
             export: None,
             export_progress: 0.0,
             export_message: None,
@@ -175,6 +177,11 @@ impl VideoApp {
                 {
                     ui.close();
                 }
+                ui.separator();
+                if ui.button("Keyboard shortcuts…").clicked() {
+                    ui.close();
+                    self.show_shortcuts_dialog = true;
+                }
             });
             if ui
                 .add_enabled(self.history.can_undo(), egui::Button::new("Undo"))
@@ -238,6 +245,61 @@ impl VideoApp {
                 width: options.width,
                 fps: options.fps,
             });
+        }
+    }
+
+    fn shortcuts_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_shortcuts_dialog {
+            return;
+        }
+        let mut close = false;
+        egui::Modal::new(egui::Id::new("keyboard-shortcuts")).show(ctx, |ui| {
+            ui.heading("Keyboard shortcuts");
+            egui::ScrollArea::vertical()
+                .max_height(420.0)
+                .show(ui, |ui| {
+                    shortcut_section(
+                        ui,
+                        "File and editing",
+                        &[
+                            ("Open video", "Ctrl+O"),
+                            ("Open project", "Ctrl+Shift+O"),
+                            ("Save project", "Ctrl+S"),
+                            ("Save as", "Ctrl+Shift+S"),
+                            ("Undo", "Ctrl+Z"),
+                            ("Redo", "Ctrl+Y / Ctrl+Shift+Z"),
+                        ],
+                    );
+                    ui.add_space(8.0);
+                    shortcut_section(
+                        ui,
+                        "Playback",
+                        &[
+                            ("Play / pause", "Space"),
+                            ("Seek 1 second", "Left / Right"),
+                            ("Seek 5 seconds", "Shift+Left / Right"),
+                            ("Step one frame", "Ctrl+Left / Right, or , / ."),
+                            ("Mute", "M"),
+                        ],
+                    );
+                    ui.add_space(8.0);
+                    shortcut_section(
+                        ui,
+                        "View and annotations",
+                        &[
+                            ("Full screen", "F11"),
+                            ("Exit full screen", "Esc"),
+                            ("Show / hide video information", "Ctrl+I"),
+                            ("Delete selected annotation", "Delete"),
+                            ("Cancel current gesture / selection", "Esc"),
+                        ],
+                    );
+                });
+            ui.separator();
+            close = ui.button("Close").clicked();
+        });
+        if close {
+            self.show_shortcuts_dialog = false;
         }
     }
 
@@ -682,8 +744,14 @@ impl eframe::App for VideoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_export(&ctx);
+        if self.show_shortcuts_dialog
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.show_shortcuts_dialog = false;
+        }
         if ctx.input(|i| i.viewport().close_requested()) {
             self.gif_dialog = None;
+            self.show_shortcuts_dialog = false;
         }
         if ctx.input(|i| i.viewport().close_requested()) && self.export.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -700,6 +768,7 @@ impl eframe::App for VideoApp {
             && self.loading.is_none()
             && self.export.is_none()
             && self.gif_dialog.is_none()
+            && !self.show_shortcuts_dialog
         {
             self.shortcuts(&ctx);
         }
@@ -707,6 +776,7 @@ impl eframe::App for VideoApp {
             && self.export.is_none()
             && self.loading.is_none()
             && self.gif_dialog.is_none()
+            && !self.show_shortcuts_dialog
             && let Some(path) = ctx.input(|i| {
                 i.raw
                     .dropped_files
@@ -727,70 +797,152 @@ impl eframe::App for VideoApp {
                 self.video_view(ui, ui.available_size(), true);
                 return;
             }
-            if let Some(message) = &self.export_message { ui.label(message); }
+            if let Some(message) = &self.export_message {
+                ui.label(message);
+            }
             if let Some(job) = &self.export {
                 ui.horizontal(|ui| {
-                    ui.add(egui::ProgressBar::new(self.export_progress).desired_width(240.0).show_percentage());
-                    if ui.button("Cancel export").clicked() { job.cancel(); }
+                    ui.add(
+                        egui::ProgressBar::new(self.export_progress)
+                            .desired_width(240.0)
+                            .show_percentage(),
+                    );
+                    if ui.button("Cancel export").clicked() {
+                        job.cancel();
+                    }
                 });
                 ui.disable();
             }
-            if self.loading.is_some() { ui.label("Opening source video… Current project is kept until validation succeeds."); }
-            if self.pending.is_some() || self.loading.is_some() { ui.disable(); }
+            if self.loading.is_some() {
+                ui.label(
+                    "Opening source video… Current project is kept until validation succeeds.",
+                );
+            }
+            if self.pending.is_some() || self.loading.is_some() {
+                ui.disable();
+            }
             self.top_bar(ui);
-            if self.project.is_none() { ui.label("Open a local video or drop one into this window."); }
+            if self.project.is_none() {
+                ui.label("Open a local video or drop one into this window.");
+            }
             let state = self.player.as_ref().map(|p| p.state.clone());
             if let Some(s) = &state {
                 if !s.loaded && self.error.is_none() {
-                    ui.horizontal(|ui| { ui.spinner(); ui.label("Opening video..."); });
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Opening video...");
+                    });
                 } else if s.seeking {
-                    ui.horizontal(|ui| { ui.spinner(); ui.label("Seeking..."); });
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Seeking...");
+                    });
                 }
             }
-            if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+            if let Some(error) = &self.error {
+                ui.colored_label(egui::Color32::LIGHT_RED, error);
+            }
             if let Some(project) = self.project.as_mut() {
-                let pause = ui.scope(|ui| {
-                    ui.set_min_height(126.0);
-                    self.editor.toolbar(ui, project)
-                }).inner;
-                if pause { self.act(|p|p.pause(true)); }
+                let pause = ui
+                    .scope(|ui| {
+                        ui.set_min_height(126.0);
+                        self.editor.toolbar(ui, project)
+                    })
+                    .inner;
+                if pause {
+                    self.act(|p| p.pause(true));
+                }
             }
             ui.separator();
-            let size = egui::vec2(ui.available_width(), (ui.available_height() - 370.0).max(80.0));
+            let size = egui::vec2(
+                ui.available_width(),
+                (ui.available_height() - 370.0).max(80.0),
+            );
             self.video_view(ui, size, false);
             ui.add_space(8.0);
             if let Some(s) = &state {
                 ui.add_enabled_ui(s.loaded, |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button(if s.ended { "Replay" } else if s.paused { "Play" } else { "Pause" }).on_hover_text("Space").clicked() { self.act(Player::toggle); }
-                        for (label,delta) in [("-5 s",-5.0),("-1 s",-1.0)] {
-                            if ui.button(label).clicked() { self.act(|p| p.seek(s.position+delta)); }
+                        if ui
+                            .button(if s.ended {
+                                "Replay"
+                            } else if s.paused {
+                                "Play"
+                            } else {
+                                "Pause"
+                            })
+                            .on_hover_text("Space")
+                            .clicked()
+                        {
+                            self.act(Player::toggle);
                         }
-                        if ui.button("-1 frame").on_hover_text("Ctrl+Left or ,").clicked() { self.act(|p| p.step(false)); }
-                        if ui.button("+1 frame").on_hover_text("Ctrl+Right or .").clicked() { self.act(|p| p.step(true)); }
-                        for (label,delta) in [("+1 s",1.0),("+5 s",5.0)] {
-                            if ui.button(label).clicked() { self.act(|p| p.seek(s.position+delta)); }
+                        for (label, delta) in [("-5 s", -5.0), ("-1 s", -1.0)] {
+                            if ui.button(label).clicked() {
+                                self.act(|p| p.seek(s.position + delta));
+                            }
                         }
-                        ui.label(format!("{} / {}", timecode(self.scrub.unwrap_or(s.position)), timecode(s.duration)));
+                        if ui
+                            .button("-1 frame")
+                            .on_hover_text("Ctrl+Left or ,")
+                            .clicked()
+                        {
+                            self.act(|p| p.step(false));
+                        }
+                        if ui
+                            .button("+1 frame")
+                            .on_hover_text("Ctrl+Right or .")
+                            .clicked()
+                        {
+                            self.act(|p| p.step(true));
+                        }
+                        for (label, delta) in [("+1 s", 1.0), ("+5 s", 5.0)] {
+                            if ui.button(label).clicked() {
+                                self.act(|p| p.seek(s.position + delta));
+                            }
+                        }
+                        ui.label(format!(
+                            "{} / {}",
+                            timecode(self.scrub.unwrap_or(s.position)),
+                            timecode(s.duration)
+                        ));
                     });
-                    if let Some(position) = seek_slider(ui, &mut self.scrub, s.position, s.duration) {
-                        if !s.paused { self.act(|p| p.pause(true)); }
+                    if let Some(position) = seek_slider(ui, &mut self.scrub, s.position, s.duration)
+                    {
+                        if !s.paused {
+                            self.act(|p| p.pause(true));
+                        }
                         self.act(|p| p.seek(position));
                     }
                     ui.horizontal(|ui| {
-                        if ui.checkbox(&mut self.muted,"Mute").changed() { let muted=self.muted; self.act(|p| p.mute(muted)); }
-                        ui.spacing_mut().slider_width=120.0;
-                        if ui.add(egui::Slider::new(&mut self.volume,0.0..=100.0).text("Volume")).changed() { let volume=self.volume; self.act(|p| p.volume(volume)); }
+                        if ui.checkbox(&mut self.muted, "Mute").changed() {
+                            let muted = self.muted;
+                            self.act(|p| p.mute(muted));
+                        }
+                        ui.spacing_mut().slider_width = 120.0;
+                        if ui
+                            .add(egui::Slider::new(&mut self.volume, 0.0..=100.0).text("Volume"))
+                            .changed()
+                        {
+                            let volume = self.volume;
+                            self.act(|p| p.volume(volume));
+                        }
                     });
                 });
             }
             ui.separator();
-            ui.small("Space: play/pause  |  Left/Right: 1 s  |  Shift+Left/Right: 5 s  |  Ctrl+Left/Right: one frame  |  F11: fullscreen  |  Ctrl+I: video info  |  Esc: exit  |  M: mute");
-            ui.small("Ctrl+S: save project  |  Ctrl+Shift+O: open project  |  Ctrl+Z / Ctrl+Y: undo / redo");
             if let Some(project) = self.project.as_mut() {
-                let action = self.editor.timeline(ui, project, self.scrub.unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)));
-                if action.pause { self.act(|p| p.pause(true)); }
-                if let Some(time) = action.seek { self.act(|p| p.seek(time)); }
+                let action = self.editor.timeline(
+                    ui,
+                    project,
+                    self.scrub
+                        .unwrap_or_else(|| state.as_ref().map_or(0.0, |s| s.position)),
+                );
+                if action.pause {
+                    self.act(|p| p.pause(true));
+                }
+                if let Some(time) = action.seek {
+                    self.act(|p| p.seek(time));
+                }
             }
         });
         if let Some(project) = &self.project {
@@ -798,6 +950,7 @@ impl eframe::App for VideoApp {
             self.history.observe(&project.annotations, editing);
         }
         self.gif_export_dialog(&ctx);
+        self.shortcuts_dialog(&ctx);
         if self.pending.is_some() {
             let mut discard = false;
             let mut cancel = false;
@@ -834,6 +987,20 @@ impl eframe::App for VideoApp {
 enum Pending {
     Open(PathBuf),
     Close,
+}
+
+fn shortcut_section(ui: &mut egui::Ui, title: &str, rows: &[(&str, &str)]) {
+    ui.strong(title);
+    egui::Grid::new(title)
+        .num_columns(2)
+        .spacing([24.0, 4.0])
+        .show(ui, |ui| {
+            for &(action, keys) in rows {
+                ui.label(action);
+                ui.label(egui::RichText::new(keys).monospace());
+                ui.end_row();
+            }
+        });
 }
 
 fn video_information_text(state: &PlaybackState) -> String {
@@ -1188,6 +1355,7 @@ mod tests {
             gif_width: 640,
             gif_fps: 15,
             gif_dialog: None,
+            show_shortcuts_dialog: false,
             export: None,
             export_progress: 0.0,
             export_message: None,
