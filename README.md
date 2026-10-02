@@ -178,6 +178,11 @@ double-click returns to the editor.
 
 ## Annotation controls
 
+Choose **Misc > Theme** for Dark, Light, Ocean (blue/cyan), Forest (green),
+Plum (purple), or Sand (warm cream/ochre). Changes apply immediately and the
+choice is remembered when the app closes. Themes affect the editor UI, not
+the source video, annotation colors, or exports.
+
 Choose a shape tool in the timeline and drag on the video; choose Text there and
 click to add a text box. Use Select to move an annotation and its blue handles
 to resize it. Arrows have two endpoint handles. Text-box resizing changes
@@ -202,8 +207,8 @@ videos).
 
 Select a timeline row to seek to its start, or click/drag the ruler or a track to
 seek to that time and pause. Edit Start/End in seconds or use the playhead buttons.
-The selected annotation bar has four draggable points: the white points at its
-lower corners change its start and end, while the blue points along its upper
+The selected annotation bar has four draggable points: the points at its
+lower corners change its start and end, while the accent-colored points along its upper
 edge set fade-in and fade-out durations. Other bars hide their points until
 selected. A single colored ramp on each side shows the fade profile. Hover a
 point to see its value; dragging a point pauses playback without seeking. The

@@ -131,7 +131,7 @@ impl Editor {
                     align,
                     format!("{:.2}", duration * f as f64),
                     egui::FontId::proportional(11.0),
-                    Color32::GRAY,
+                    ui.visuals().weak_text_color(),
                 );
             }
             if (response.clicked() || response.dragged())
@@ -174,7 +174,7 @@ impl Editor {
                             );
                             let rect = time_rect(allocated);
                             let p = ui.painter();
-                            p.rect_filled(rect, 2.0, Color32::from_gray(35));
+                            p.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
                             let x = |t: f64| x_at_time(rect, t, duration);
                             let bar = Rect::from_min_max(
                                 egui::pos2(x(start), rect.top() + 3.0),
@@ -206,7 +206,7 @@ impl Editor {
                                 p.rect_stroke(
                                     bar,
                                     2.0,
-                                    Stroke::new(1.0, Color32::WHITE),
+                                    Stroke::new(1.0, ui.visuals().hyperlink_color),
                                     egui::StrokeKind::Inside,
                                 );
                             }
@@ -215,16 +215,22 @@ impl Editor {
                                     egui::pos2(x(time), rect.top()),
                                     egui::pos2(x(time), rect.bottom()),
                                 ],
-                                Stroke::new(1.5, Color32::LIGHT_RED),
+                                Stroke::new(1.5, ui.visuals().error_fg_color),
                             );
                             if focused {
                                 for (handle, center) in positions {
                                     let fill = match handle {
-                                        Handle::Start | Handle::End => Color32::WHITE,
-                                        Handle::FadeIn | Handle::FadeOut => Color32::LIGHT_BLUE,
+                                        Handle::Start | Handle::End => ui.visuals().text_color(),
+                                        Handle::FadeIn | Handle::FadeOut => {
+                                            ui.visuals().hyperlink_color
+                                        }
                                     };
                                     p.circle_filled(center, 4.5, fill);
-                                    p.circle_stroke(center, 4.5, Stroke::new(1.0, Color32::BLACK));
+                                    p.circle_stroke(
+                                        center,
+                                        4.5,
+                                        Stroke::new(1.0, ui.visuals().panel_fill),
+                                    );
                                 }
                             }
                             let hovered = focused

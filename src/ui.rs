@@ -1,3 +1,4 @@
+use crate::theme::{self, Theme};
 use eframe::egui;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use video_annotations::{
@@ -8,6 +9,7 @@ use video_annotations::{
 };
 
 pub struct VideoApp {
+    theme: Theme,
     gif_width: u32,
     gif_fps: u32,
     gif_dialog: Option<GifExportOptions>,
@@ -37,8 +39,14 @@ pub struct VideoApp {
 
 impl VideoApp {
     pub fn new(cc: &eframe::CreationContext<'_>, source: Option<PathBuf>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        let theme = cc
+            .storage
+            .and_then(|storage| storage.get_string(theme::STORAGE_KEY))
+            .map(|id| Theme::from_id(&id))
+            .unwrap_or_default();
+        theme.apply(&cc.egui_ctx);
         let mut app = Self {
+            theme,
             gif_width: 640,
             gif_fps: 15,
             gif_dialog: None,
@@ -164,6 +172,31 @@ impl VideoApp {
                 }
             });
             ui.menu_button("Misc", |ui| {
+                ui.menu_button("Theme", |ui| {
+                    for theme in Theme::ALL {
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                            let visuals = theme.visuals();
+                            ui.painter().rect_filled(rect, 3.0, visuals.panel_fill);
+                            ui.painter().rect_stroke(
+                                rect,
+                                3.0,
+                                egui::Stroke::new(1.5, visuals.hyperlink_color),
+                                egui::StrokeKind::Inside,
+                            );
+                            if ui
+                                .selectable_label(self.theme == theme, theme.label())
+                                .clicked()
+                            {
+                                self.theme = theme;
+                                theme.apply(&self.context);
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+                ui.separator();
                 if ui.button("Full screen    F11").clicked() {
                     ui.close();
                     self.toggle_fullscreen();
@@ -744,6 +777,10 @@ impl VideoApp {
 }
 
 impl eframe::App for VideoApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(theme::STORAGE_KEY, self.theme.label().to_owned());
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_export(&ctx);
@@ -1421,6 +1458,7 @@ mod tests {
             5.0,
         ));
         VideoApp {
+            theme: Theme::default(),
             gif_width: 640,
             gif_fps: 15,
             gif_dialog: None,
