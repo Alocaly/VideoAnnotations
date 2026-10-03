@@ -373,6 +373,21 @@ mod tests {
         assert!(!a.hit([100.0, 80.0], 1.0));
     }
     #[test]
+    fn long_arrow_keeps_an_open_head_proportional_to_its_length() {
+        let cancel = AtomicBool::new(false);
+        let a = Annotation::new(Kind::Arrow, [20.0, 100.0], [720.0, 100.0], 2.0);
+        let image =
+            rasterize_scene(std::slice::from_ref(&a), [760, 220], 1.0, 2.0, &cancel).unwrap();
+        assert!(image.get_pixel(670, 133)[3] > 200);
+        assert!(image.get_pixel(670, 67)[3] > 200);
+        assert_eq!(
+            image.get_pixel(670, 115)[3],
+            0,
+            "Open space between shaft and wing"
+        );
+        assert!(a.hit([670.0, 133.0], 1.0));
+    }
+    #[test]
     fn spotlight_preserves_inner_pixels_and_fades_outer_dimming() {
         let cancel = AtomicBool::new(false);
         let mut a = Annotation::new(Kind::Spotlight, [40.0, 30.0], [120.0, 70.0], 4.0);

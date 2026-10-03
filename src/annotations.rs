@@ -227,11 +227,13 @@ impl Annotation {
         } else {
             [0.0; 2]
         };
-        let head = (16.0_f32).max(self.thickness * 3.0).min(length * 0.4);
+        // A fixed-size head disappears on long arrows. Scale it with both
+        // length and thickness, leaving enough shaft on short arrows.
+        let head = (length * 0.18).max(self.thickness * 6.0).min(length * 0.45);
         let wing = |side: f32| {
             [
-                self.b[0] - unit[0] * head - unit[1] * head * 0.5 * side,
-                self.b[1] - unit[1] * head + unit[0] * head * 0.5 * side,
+                self.b[0] - unit[0] * head - unit[1] * head * 0.65 * side,
+                self.b[1] - unit[1] * head + unit[0] * head * 0.65 * side,
             ]
         };
         [self.a, wing(1.0), wing(-1.0)].map(|from| {
@@ -243,7 +245,13 @@ impl Annotation {
             } else {
                 0.0
             };
-            let shoulder = [from[0] + delta[0] * 0.9, from[1] + delta[1] * 0.9];
+            // Wings broaden before the tip, not immediately beside it:
+            // otherwise their overlapping shoulders form a blunt block.
+            let shoulder_fraction = if from == self.a { 0.85 } else { 0.6 };
+            let shoulder = [
+                from[0] + delta[0] * shoulder_fraction,
+                from[1] + delta[1] * shoulder_fraction,
+            ];
             let offset = [-delta[1] * factor, delta[0] * factor];
             [
                 from,
