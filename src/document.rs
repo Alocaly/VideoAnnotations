@@ -48,13 +48,16 @@ pub fn validate(project: &Project) -> Result<(), String> {
                 Effect::Orbit { period, .. } => {
                     !period.is_finite()
                         || !(0.1..=60.0).contains(&period)
-                        || !matches!(a.kind, Kind::Rectangle | Kind::Ellipse)
+                        || !a.kind.supports_orbit()
                 }
             }
         {
             return Err("Invalid annotation effects.".into());
         }
-        if !a.start_seconds.is_finite()
+        if (a.kind == Kind::Spotlight && e.effect != Effect::None)
+            || !a.dimming.is_finite()
+            || !(0.0..=1.0).contains(&a.dimming)
+            || !a.start_seconds.is_finite()
             || !a.end_seconds.is_finite()
             || a.start_seconds < 0.0
             || a.end_seconds <= a.start_seconds
@@ -97,7 +100,7 @@ pub fn load(path: &Path) -> Result<Project, String> {
     let mut json: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("Invalid project file: {e}"))?;
     let version = json["version"].as_u64().ok_or("Invalid project version")?;
-    if !matches!(version, 1..=4) {
+    if !matches!(version, 1..=5) {
         return Err(format!("Unsupported project version: {version}"));
     }
     if version < 4 {
@@ -127,7 +130,7 @@ pub fn save(project: &Project, path: &Path) -> Result<(), String> {
     let mut stored = project.clone();
     stored.video.path = source.strip_prefix(parent).unwrap_or(&source).to_path_buf();
     let bytes = serde_json::to_vec_pretty(&Document {
-        version: 4,
+        version: 5,
         project: stored,
     })
     .map_err(|e| e.to_string())?;
@@ -291,7 +294,14 @@ mod tests {
             duration: 20.0,
             fps: Some(29.97),
         });
-        for kind in [Kind::Text, Kind::Rectangle, Kind::Ellipse, Kind::Arrow] {
+        for kind in [
+            Kind::Text,
+            Kind::Rectangle,
+            Kind::Ellipse,
+            Kind::Arrow,
+            Kind::Line,
+            Kind::Spotlight,
+        ] {
             let mut a =
                 Annotation::new(kind, [50.0, 60.0], [400.0, 300.0], 20.0).at_playhead(3.0, 20.0);
             a.text = "étiquette 日本語\nsecond line".into();
@@ -301,6 +311,38 @@ mod tests {
             p.annotations.push(a);
         }
         p
+    }
+    #[test]
+    fn version_four_defaults_dimming_and_new_settings_are_validated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v4.vannot");
+        let mut p = fixture(dir.path());
+        p.annotations.truncate(4);
+        let mut json = serde_json::to_value(Document {
+            version: 4,
+            project: p.clone(),
+        })
+        .unwrap();
+        for a in json["project"]["annotations"].as_array_mut().unwrap() {
+            a.as_object_mut().unwrap().remove("dimming");
+        }
+        std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(load(&path).unwrap(), p);
+        p.annotations[0].kind = Kind::Spotlight;
+        p.annotations[0].dimming = 1.1;
+        assert!(validate(&p).is_err());
+        p.annotations[0].dimming = 0.75;
+        p.annotations[0].effects.effect = Effect::Glow {
+            color: [0; 3],
+            pulse_hz: 1.0,
+        };
+        assert!(validate(&p).is_err());
+        p.annotations[0].kind = Kind::Line;
+        p.annotations[0].effects.effect = Effect::Orbit {
+            color: [0, 0, 255],
+            period: 1.0,
+        };
+        assert!(validate(&p).is_ok());
     }
     #[test]
     fn roundtrip_and_atomic_replacement_preserve_all_settings() {
@@ -322,7 +364,7 @@ mod tests {
         assert_eq!(load(&path).unwrap(), p);
         let json: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(json["version"], 4);
+        assert_eq!(json["version"], 5);
         assert_eq!(json["project"]["video"]["path"], "source.mp4");
         p.annotations.reverse();
         p.annotations[0].start_seconds = 1.0;

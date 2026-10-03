@@ -12,12 +12,12 @@ pub fn paint_at(
     time: f64,
 ) {
     let a = source.evaluated(time);
-    if a.color[3] == 0 {
+    if a.color[3] == 0 && a.kind != Kind::Spotlight {
         return;
     }
     paint(p, &a, viewport, extent);
     if let Effect::Orbit { color, period } = a.effects.effect
-        && matches!(a.kind, Kind::Rectangle | Kind::Ellipse)
+        && a.kind.supports_orbit()
     {
         let phase = ((time - a.start_seconds).max(0.0) / period).fract() as f32;
         let point = orbit_point(&a, phase);
@@ -35,6 +35,11 @@ pub fn paint_at(
 }
 
 fn orbit_point(a: &Annotation, phase: f32) -> [f32; 2] {
+    if a.kind == Kind::Line {
+        // Travel to the other endpoint and back, without jumping at loop end.
+        let t = 1.0 - (2.0 * phase - 1.0).abs();
+        return std::array::from_fn(|i| a.a[i] + (a.b[i] - a.a[i]) * t);
+    }
     let (min, max) = a.bounds();
     if a.kind == Kind::Ellipse {
         let angle = phase * std::f32::consts::TAU;
@@ -89,6 +94,30 @@ pub fn paint(p: &egui::Painter, a: &Annotation, viewport: Rect, extent: [f32; 2]
     let (min, max) = a.bounds();
     let rect = Rect::from_two_pos(screen(min), screen(max));
     match a.kind {
+        Kind::Spotlight => {
+            let hole = rect.intersect(viewport);
+            let shade = Color32::from_black_alpha((a.dimming * 255.0).round() as u8);
+            // Four non-overlapping panels leave the selected region untouched.
+            for panel in [
+                Rect::from_min_max(viewport.min, Pos2::new(viewport.max.x, hole.min.y)),
+                Rect::from_min_max(Pos2::new(viewport.min.x, hole.max.y), viewport.max),
+                Rect::from_min_max(
+                    Pos2::new(viewport.min.x, hole.min.y),
+                    Pos2::new(hole.min.x, hole.max.y),
+                ),
+                Rect::from_min_max(
+                    Pos2::new(hole.max.x, hole.min.y),
+                    Pos2::new(viewport.max.x, hole.max.y),
+                ),
+            ] {
+                if panel.is_positive() {
+                    p.rect_filled(panel, 0.0, shade);
+                }
+            }
+        }
+        Kind::Line => {
+            p.line_segment([screen(a.a), screen(a.b)], stroke);
+        }
         Kind::Rectangle => {
             p.rect_stroke(rect, 0.0, stroke, egui::StrokeKind::Inside);
         }
@@ -329,6 +358,49 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn spotlight_preserves_inner_pixels_and_fades_outer_dimming() {
+        let cancel = AtomicBool::new(false);
+        let mut a = Annotation::new(Kind::Spotlight, [40.0, 30.0], [120.0, 70.0], 4.0);
+        a.dimming = 0.8;
+        a.effects.fade_in = 1.0;
+        a.effects.fade_out = 1.0;
+        for (time, alpha) in [(0.0, 0), (0.5, 102), (2.0, 204), (3.5, 102), (4.0, 0)] {
+            let image = rasterize_scene(&[a.clone()], [160, 100], time, 4.0, &cancel).unwrap();
+            assert_eq!(image.get_pixel(80, 50).0, [0; 4]);
+            for (x, y) in [(80, 10), (80, 90), (10, 50), (150, 50), (10, 10)] {
+                assert_eq!(image.get_pixel(x, y).0, [0, 0, 0, alpha]);
+            }
+        }
+        a.dimming = 0.0;
+        assert!(
+            rasterize_scene(&[a], [160, 100], 2.0, 4.0, &cancel)
+                .unwrap()
+                .pixels()
+                .all(|p| p[3] == 0)
+        );
+    }
+
+    #[test]
+    fn line_ball_returns_without_jumping_and_stroke_has_no_arrowhead() {
+        let cancel = AtomicBool::new(false);
+        let mut a = Annotation::new(Kind::Line, [20.0, 50.0], [120.0, 50.0], 4.0);
+        a.color = [255, 0, 0, 255];
+        assert_eq!(orbit_point(&a, 0.0), a.a);
+        assert_eq!(orbit_point(&a, 0.5), a.b);
+        assert_eq!(orbit_point(&a, 0.25), [70.0, 50.0]);
+        assert_eq!(orbit_point(&a, 0.75), [70.0, 50.0]);
+        assert_eq!(orbit_point(&a, 1.0), a.a);
+        let plain = rasterize_scene(&[a.clone()], [160, 100], 0.0, 4.0, &cancel).unwrap();
+        assert_eq!(plain.get_pixel(70, 50).0, [255, 0, 0, 255]);
+        assert_eq!(plain.get_pixel(108, 55)[3], 0);
+        a.effects.effect = Effect::Orbit {
+            color: [0, 0, 255],
+            period: 2.0,
+        };
+        let ball = rasterize_scene(&[a], [160, 100], 0.5, 4.0, &cancel).unwrap();
+        assert_eq!(ball.get_pixel(70, 50).0, [0, 0, 255, 255]);
+    }
     #[test]
     fn orbit_follows_stroke_center_for_rectangles_and_ellipses() {
         let mut a = Annotation::new(Kind::Rectangle, [20.0, 20.0], [100.0, 70.0], 2.0);

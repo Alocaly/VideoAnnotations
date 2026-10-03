@@ -5,7 +5,7 @@ A Rust desktop application for annotating a single video per project, currently 
 ## Planned features
 
 - Video playback with audio, fullscreen, and keyboard/button navigation by one frame, one second, or five seconds in either direction.
-- Text, rectangles, ellipses, and arrows, with editable appearance and placement.
+- Text, rectangles, ellipses, arrows, lines, and rectangular spotlights, with editable appearance and placement.
 - A timeline controlling annotation start and end times and stacking order.
 - Annotation animations, including timeline fades, glow, and an orbiting ball.
 - Save and reopen annotation projects.
@@ -22,7 +22,7 @@ direction, and switches to fullscreen. It includes a position/duration display,
 volume and mute, and replay at the end. Files open paused through the picker,
 drag-and-drop, or a command-line argument.
 
-Add text, rectangles, ellipses, and arrows directly on the preview. Select, move,
+Add text, rectangles, ellipses, arrows, lines, and spotlights directly on the preview. Select, move,
 resize, recolor, and delete them using the annotation tools. Geometry and style
 sizes use video coordinates, preserving placement when the window changes size.
 The annotation timeline holds the drawing tools and controls start/end times,
@@ -246,11 +246,11 @@ field. While typing, Ctrl+Z/Y belongs to the text field; use the Undo/Redo butto
 for project history. Playback, selection, file operations, and source relinking
 are not undoable, and history is not stored in the project file.
 
-Projects now save as format version 4, with a single optional effect per annotation.
-Version 1–3 projects still open. Their fades are preserved and movement is removed;
+Projects now save as format version 5, with a single optional effect per annotation.
+Version 1–4 projects still open. In versions 1–3, fades are preserved and movement is removed;
 old Glow settings become a two-color pulse, and a traveling outline becomes an
 orbiting ball. When both were enabled, Glow takes priority. Missing names receive
-generated labels. Older app versions cannot open newly saved version 4 projects;
+generated labels. Older app versions cannot open newly saved version 5 projects;
 keep a copy if you need to use an older executable.
 
 ## Annotation effects
@@ -262,10 +262,17 @@ Only one effect can be active:
 - **Glow**: oscillates smoothly between the annotation color and **Pulse color**.
   **Pulse speed** is in Hz (0.05–10); 0.5 Hz gives a full cycle every two seconds.
   Color reaches the second shade halfway through the cycle and then returns.
-- **Orbiting ball** (rectangles/ellipses): a filled ball in **Ball color** travels
+- **Orbiting ball** (rectangles/ellipses/lines): a filled ball in **Ball color** travels
   clockwise along the contour, keeping the whole original shape visible.
   **Turn duration** controls seconds per revolution (0.1–60). Ball size follows
   annotation thickness; video edges clip it.
+  On a line, the ball travels between endpoints and back; the duration is a full round trip.
+
+**Spotlight** is a separate annotation tool: drag a rectangle around the area to
+keep clear, then adjust **Dimming** from 0% (unchanged) to 100% (black) in Properties.
+It has no color, thickness, Glow, or Orbiting ball controls. Timeline fades
+interpolate the surrounding dimming from/to zero; the inner rectangle stays untouched.
+Like other annotations, its layer order determines which annotations it darkens.
 
 Set fades with the timeline points. They remain independent of the chosen effect;
 overlapping fades use the lower opacity. Movement is currently disabled.

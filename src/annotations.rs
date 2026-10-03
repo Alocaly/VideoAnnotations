@@ -5,6 +5,8 @@ pub enum Kind {
     Rectangle,
     Ellipse,
     Arrow,
+    Line,
+    Spotlight,
 }
 impl Kind {
     pub fn label(self) -> &'static str {
@@ -13,7 +15,12 @@ impl Kind {
             Self::Rectangle => "Rectangle",
             Self::Ellipse => "Ellipse",
             Self::Arrow => "Arrow",
+            Self::Line => "Line",
+            Self::Spotlight => "Spotlight",
         }
+    }
+    pub fn supports_orbit(self) -> bool {
+        matches!(self, Self::Rectangle | Self::Ellipse | Self::Line)
     }
 }
 
@@ -33,8 +40,15 @@ pub struct Annotation {
     pub color: [u8; 4],
     pub thickness: f32,
     pub font_size: f32,
+    /// Fraction of light blocked outside a Spotlight's rectangle.
+    #[serde(default = "default_dimming")]
+    pub dimming: f32,
     #[serde(default)]
     pub effects: Effects,
+}
+
+fn default_dimming() -> f32 {
+    0.65
 }
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -91,6 +105,7 @@ impl Annotation {
             1.0
         };
         a.color[3] = (self.color[3] as f64 * fade_in.min(fade_out)).round() as u8;
+        a.dimming = self.dimming * fade_in.min(fade_out) as f32;
         if let Effect::Glow { color, pulse_hz } = self.effects.effect {
             let phase = std::f64::consts::TAU * elapsed * pulse_hz;
             let mix = (1.0 - phase.cos()) * 0.5;
@@ -150,6 +165,7 @@ impl Annotation {
             color: [255, 210, 60, 255],
             thickness: 4.0,
             font_size: 36.0,
+            dimming: default_dimming(),
             effects: Effects::default(),
         }
     }
@@ -168,7 +184,7 @@ impl Annotation {
         }
     }
     pub fn hit(&self, point: [f32; 2], tolerance: f32) -> bool {
-        if self.kind == Kind::Arrow {
+        if matches!(self.kind, Kind::Arrow | Kind::Line) {
             return segment_distance(point, self.a, self.b) <= tolerance + self.thickness * 0.5;
         }
         let (min, max) = self.bounds();

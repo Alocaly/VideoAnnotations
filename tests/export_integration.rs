@@ -20,6 +20,9 @@ fn tool(name: &str) -> PathBuf {
         })
 }
 fn fixture(path: &Path, audio: bool) -> Project {
+    fixture_color(path, audio, "black")
+}
+fn fixture_color(path: &Path, audio: bool, color: &str) -> Project {
     let mut cmd = Command::new(tool("ffmpeg"));
     cmd.args([
         "-v",
@@ -27,7 +30,7 @@ fn fixture(path: &Path, audio: bool) -> Project {
         "-f",
         "lavfi",
         "-i",
-        "color=black:size=160x100:rate=10:duration=2",
+        &format!("color={color}:size=160x100:rate=10:duration=2"),
     ]);
     if audio {
         cmd.args([
@@ -50,6 +53,44 @@ fn fixture(path: &Path, audio: bool) -> Project {
         String::from_utf8_lossy(&result.stderr)
     );
     Project::new(MediaBackend::default().probe(path).unwrap())
+}
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
+fn line_and_spotlight_fades_survive_mp4_and_gif_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("white.mp4");
+    let mut project = fixture_color(&source, false, "white");
+    let mut spot = Annotation::new(Kind::Spotlight, [40.0, 30.0], [120.0, 70.0], 2.0);
+    spot.dimming = 0.8;
+    spot.effects.fade_in = 0.5;
+    spot.effects.fade_out = 0.5;
+    let mut line = Annotation::new(Kind::Line, [50.0, 50.0], [110.0, 50.0], 2.0);
+    line.color = [255, 0, 0, 255];
+    line.effects.effect = Effect::Orbit {
+        color: [0, 0, 255],
+        period: 2.0,
+    };
+    project.annotations = vec![spot, line];
+    for (format, extension, width) in [
+        (export::Format::Mp4, "mp4", 160),
+        (export::Format::Gif { width: 80, fps: 10 }, "gif", 80),
+    ] {
+        let out = dir.path().join(format!("spotlight-line.{extension}"));
+        export::export_with_format(&project, &out, format, &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+        let at = |t, x, y| pixel_with_width(&out, t, x * width / 160, y * width / 160, width);
+        assert!(at(0.0, 10, 50)[0] > 230, "No dimming at fade start");
+        assert!(
+            at(0.3, 10, 50)[0] > at(0.6, 10, 50)[0] + 50,
+            "Fade interpolates dimming"
+        );
+        assert!(at(0.6, 10, 50)[0] < 70, "Outer pixels reach target dimming");
+        assert!(at(0.6, 80, 35)[0] > 230, "Spotlight interior is unchanged");
+        assert!(at(1.8, 10, 50)[0] > 140, "Fade out restores the video");
+        let ball = at(0.5, 80, 50);
+        assert!(ball[2] > 150 && ball[0] < 80, "Ball follows line midpoint");
+    }
 }
 fn pixel(path: &Path, time: f64, x: usize, y: usize) -> [u8; 3] {
     pixel_with_width(path, time, x, y, 160)

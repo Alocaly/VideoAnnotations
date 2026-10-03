@@ -55,7 +55,7 @@ MP4 and GIF exports are separate rendered files. GIF has no audio.
 Text fields capture typing shortcuts. Select a text annotation, then edit its
 Text field in the Properties panel to the right of the video. Choose one effect
 in Properties: None, Glow (second color and pulse speed), or Orbiting ball
-(rectangles/ellipses, ball color and turn duration). Set fades in the timeline.
+(rectangles/ellipses/lines, ball color and turn duration). Set fades in the timeline.
 With fade-in enabled, seek past the annotation's start
 to see it. See README.md for full instructions and limitations.
 Use the ✎ button beside the selected annotation's name in Properties to rename it.
@@ -87,7 +87,7 @@ is a ready-to-redistribute all-in-one bundle. Source:
 https://github.com/Alocaly/VideoAnnotations
 
 Updating: extract into a new folder, copy the trusted `tools` folders if desired,
-then open your existing projects. Keep old projects backed up: saved version-4
+then open your existing projects. Keep old projects backed up: saved version-5
 projects require the current application. Legacy motion is removed; Glow takes
 priority over a simultaneous old traveling outline. No registry changes or
 file associations are made; removal is deletion of the extracted folder after
