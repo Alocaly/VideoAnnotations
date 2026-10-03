@@ -577,12 +577,24 @@ impl Editor {
                 );
             }
             for p in handles(a) {
+                if self.tool.is_none()
+                    && ui.is_enabled()
+                    && response.hovered()
+                    && response
+                        .hover_pos()
+                        .is_some_and(|pos| map.screen(p).distance(pos) <= 9.0)
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
                 painter.rect_filled(
                     Rect::from_center_size(map.screen(p), Vec2::splat(8.0)),
                     1.0,
                     Color32::LIGHT_BLUE,
                 );
             }
+        }
+        if matches!(self.drag, Some(Drag::Resize { .. })) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
         if self.tool.is_some() && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
