@@ -129,16 +129,11 @@ pub fn paint(p: &egui::Painter, a: &Annotation, viewport: Rect, extent: [f32; 2]
             ));
         }
         Kind::Arrow => {
-            let from = screen(a.a);
-            let to = screen(a.b);
-            let d = to - from;
-            p.line_segment([from, to], stroke);
-            if d.length() > 0.1 {
-                let unit = d.normalized();
-                let head = (16.0 * scale).max(stroke.width * 3.0).min(d.length() * 0.4);
-                let normal = Vec2::new(-unit.y, unit.x);
-                p.line_segment([to, to - unit * head + normal * head * 0.5], stroke);
-                p.line_segment([to, to - unit * head - normal * head * 0.5], stroke);
+            if screen(a.a).distance(screen(a.b)) > 0.1 {
+                p.add(egui::Shape::closed_line(
+                    a.arrow_outline().into_iter().map(screen).collect(),
+                    stroke,
+                ));
             }
         }
         Kind::Text => {
@@ -358,6 +353,25 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tapered_arrow_has_closed_outline_without_a_center_shaft() {
+        let cancel = AtomicBool::new(false);
+        let mut a = Annotation::new(Kind::Arrow, [20.0, 50.0], [140.0, 50.0], 2.0);
+        a.color = [255, 0, 0, 255];
+        let image = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
+        assert_eq!(
+            image.get_pixel(80, 50)[3],
+            0,
+            "Hollow shape, no central shaft"
+        );
+        assert!(image.get_pixel(80, 58)[3] > 200);
+        assert!(image.get_pixel(80, 42)[3] > 200);
+        assert!(a.hit([125.0, 63.0], 1.0), "Shoulder can be selected");
+        assert!(a.hit([80.0, 50.0], 1.0), "Interior can be selected");
+        assert!(!a.hit([80.0, 80.0], 1.0));
+        a.b = a.a;
+        assert!(!a.hit([100.0, 80.0], 1.0));
+    }
     #[test]
     fn spotlight_preserves_inner_pixels_and_fades_outer_dimming() {
         let cancel = AtomicBool::new(false);

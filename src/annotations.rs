@@ -184,7 +184,22 @@ impl Annotation {
         }
     }
     pub fn hit(&self, point: [f32; 2], tolerance: f32) -> bool {
-        if matches!(self.kind, Kind::Arrow | Kind::Line) {
+        if self.kind == Kind::Arrow {
+            let outline = self.arrow_outline();
+            let edges = (0..4).map(|i| (outline[i], outline[(i + 1) % 4]));
+            let mut positive = false;
+            let mut negative = false;
+            for (a, b) in edges {
+                if segment_distance(point, a, b) <= tolerance + self.thickness * 0.5 {
+                    return true;
+                }
+                let cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+                positive |= cross > 0.0;
+                negative |= cross < 0.0;
+            }
+            return !(positive && negative) && self.a != self.b;
+        }
+        if self.kind == Kind::Line {
             return segment_distance(point, self.a, self.b) <= tolerance + self.thickness * 0.5;
         }
         let (min, max) = self.bounds();
@@ -200,6 +215,18 @@ impl Annotation {
                 && point[1] >= min[1] - tolerance
                 && point[1] <= max[1] + tolerance
         }
+    }
+    /// Closed tapered arrow: fine tail, broad shoulders, pointed tip.
+    pub fn arrow_outline(&self) -> [[f32; 2]; 4] {
+        let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
+        let shoulder = [self.a[0] + d[0] * 0.9, self.a[1] + d[1] * 0.9];
+        let offset = [-d[1] * 0.12, d[0] * 0.12];
+        [
+            self.a,
+            [shoulder[0] + offset[0], shoulder[1] + offset[1]],
+            self.b,
+            [shoulder[0] - offset[0], shoulder[1] - offset[1]],
+        ]
     }
 }
 
