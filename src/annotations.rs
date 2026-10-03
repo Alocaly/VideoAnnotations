@@ -185,19 +185,21 @@ impl Annotation {
     }
     pub fn hit(&self, point: [f32; 2], tolerance: f32) -> bool {
         if self.kind == Kind::Arrow {
-            let outline = self.arrow_outline();
-            let edges = (0..4).map(|i| (outline[i], outline[(i + 1) % 4]));
-            let mut positive = false;
-            let mut negative = false;
-            for (a, b) in edges {
-                if segment_distance(point, a, b) <= tolerance + self.thickness * 0.5 {
-                    return true;
+            return self.arrow_parts().into_iter().any(|outline| {
+                let edges = (0..4).map(|i| (outline[i], outline[(i + 1) % 4]));
+                let mut positive = false;
+                let mut negative = false;
+                for (a, b) in edges {
+                    if segment_distance(point, a, b) <= tolerance + self.thickness * 0.5 {
+                        return true;
+                    }
+                    let cross =
+                        (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+                    positive |= cross > 0.0;
+                    negative |= cross < 0.0;
                 }
-                let cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
-                positive |= cross > 0.0;
-                negative |= cross < 0.0;
-            }
-            return !(positive && negative) && self.a != self.b;
+                !(positive && negative) && self.a != self.b
+            });
         }
         if self.kind == Kind::Line {
             return segment_distance(point, self.a, self.b) <= tolerance + self.thickness * 0.5;
@@ -216,17 +218,40 @@ impl Annotation {
                 && point[1] <= max[1] + tolerance
         }
     }
-    /// Closed tapered arrow: fine tail, broad shoulders, pointed tip.
-    pub fn arrow_outline(&self) -> [[f32; 2]; 4] {
+    /// Three filled tapered quads: shaft and two wings, all pointing at the tip.
+    pub fn arrow_parts(&self) -> [[[f32; 2]; 4]; 3] {
         let d = [self.b[0] - self.a[0], self.b[1] - self.a[1]];
-        let shoulder = [self.a[0] + d[0] * 0.9, self.a[1] + d[1] * 0.9];
-        let offset = [-d[1] * 0.12, d[0] * 0.12];
-        [
-            self.a,
-            [shoulder[0] + offset[0], shoulder[1] + offset[1]],
-            self.b,
-            [shoulder[0] - offset[0], shoulder[1] - offset[1]],
-        ]
+        let length = d[0].hypot(d[1]);
+        let unit = if length > 0.0 {
+            [d[0] / length, d[1] / length]
+        } else {
+            [0.0; 2]
+        };
+        let head = (16.0_f32).max(self.thickness * 3.0).min(length * 0.4);
+        let wing = |side: f32| {
+            [
+                self.b[0] - unit[0] * head - unit[1] * head * 0.5 * side,
+                self.b[1] - unit[1] * head + unit[0] * head * 0.5 * side,
+            ]
+        };
+        [self.a, wing(1.0), wing(-1.0)].map(|from| {
+            let delta = [self.b[0] - from[0], self.b[1] - from[1]];
+            let length = delta[0].hypot(delta[1]);
+            let half_width = self.thickness.min(length * 0.25);
+            let factor = if length > 0.0 {
+                half_width / length
+            } else {
+                0.0
+            };
+            let shoulder = [from[0] + delta[0] * 0.9, from[1] + delta[1] * 0.9];
+            let offset = [-delta[1] * factor, delta[0] * factor];
+            [
+                from,
+                [shoulder[0] + offset[0], shoulder[1] + offset[1]],
+                self.b,
+                [shoulder[0] - offset[0], shoulder[1] - offset[1]],
+            ]
+        })
     }
 }
 

@@ -130,10 +130,13 @@ pub fn paint(p: &egui::Painter, a: &Annotation, viewport: Rect, extent: [f32; 2]
         }
         Kind::Arrow => {
             if screen(a.a).distance(screen(a.b)) > 0.1 {
-                p.add(egui::Shape::closed_line(
-                    a.arrow_outline().into_iter().map(screen).collect(),
-                    stroke,
-                ));
+                for part in a.arrow_parts() {
+                    p.add(egui::Shape::convex_polygon(
+                        part.into_iter().map(screen).collect(),
+                        color,
+                        Stroke::NONE,
+                    ));
+                }
             }
         }
         Kind::Text => {
@@ -354,19 +357,16 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 mod tests {
     use super::*;
     #[test]
-    fn tapered_arrow_has_closed_outline_without_a_center_shaft() {
+    fn tapered_arrow_has_a_filled_shaft_and_two_filled_wings() {
         let cancel = AtomicBool::new(false);
         let mut a = Annotation::new(Kind::Arrow, [20.0, 50.0], [140.0, 50.0], 2.0);
         a.color = [255, 0, 0, 255];
         let image = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
-        assert_eq!(
-            image.get_pixel(80, 50)[3],
-            0,
-            "Hollow shape, no central shaft"
-        );
-        assert!(image.get_pixel(80, 58)[3] > 200);
-        assert!(image.get_pixel(80, 42)[3] > 200);
-        assert!(a.hit([125.0, 63.0], 1.0), "Shoulder can be selected");
+        assert_eq!(image.get_pixel(80, 50)[3], 255, "Central shaft is filled");
+        assert_eq!(image.get_pixel(80, 58)[3], 0);
+        assert!(image.get_pixel(132, 54)[3] > 200);
+        assert!(image.get_pixel(132, 46)[3] > 200);
+        assert!(a.hit([132.0, 54.0], 1.0), "Wing can be selected");
         assert!(a.hit([80.0, 50.0], 1.0), "Interior can be selected");
         assert!(!a.hit([80.0, 80.0], 1.0));
         a.b = a.a;

@@ -255,9 +255,9 @@ keep a copy if you need to use an older executable.
 
 ## Annotation effects
 
-Arrows use a hollow, closed tapered outline: a fine tail widens toward the head.
+Arrows use three filled tapered shapes: a central shaft and two wings.
 Drag the two endpoint handles to orient and resize it; color and thickness style
-the outline. The same shape is used in preview, fullscreen, MP4, and GIF exports.
+the filled parts. The same shape is used in preview, fullscreen, MP4, and GIF exports.
 
 Select an annotation, then use the **Effects** dropdown below its style controls.
 Only one effect can be active:
