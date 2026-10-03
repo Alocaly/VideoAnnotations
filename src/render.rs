@@ -130,13 +130,12 @@ pub fn paint(p: &egui::Painter, a: &Annotation, viewport: Rect, extent: [f32; 2]
         }
         Kind::Arrow => {
             if screen(a.a).distance(screen(a.b)) > 0.1 {
-                for part in a.arrow_parts() {
-                    p.add(egui::Shape::convex_polygon(
-                        part.into_iter().map(screen).collect(),
-                        color,
-                        Stroke::NONE,
-                    ));
-                }
+                let points: Vec<_> = crate::arrow::outline(a).into_iter().map(screen).collect();
+                p.add(crate::arrow::mesh(
+                    &points,
+                    color,
+                    1.0 / p.ctx().pixels_per_point(),
+                ));
             }
         }
         Kind::Text => {
@@ -357,35 +356,37 @@ fn sample(image: &egui::ColorImage, uv: Vec2) -> [f32; 4] {
 mod tests {
     use super::*;
     #[test]
-    fn tapered_arrow_has_a_filled_shaft_and_two_filled_wings() {
+    fn gallery_four_arrow_has_a_filled_shaft_and_connected_head() {
         let cancel = AtomicBool::new(false);
         let mut a = Annotation::new(Kind::Arrow, [20.0, 50.0], [140.0, 50.0], 2.0);
         a.color = [255, 0, 0, 255];
         let image = rasterize_scene(&[a.clone()], [160, 100], 1.0, 2.0, &cancel).unwrap();
         assert_eq!(image.get_pixel(80, 50)[3], 255, "Central shaft is filled");
         assert_eq!(image.get_pixel(80, 58)[3], 0);
-        assert!(image.get_pixel(132, 54)[3] > 200);
-        assert!(image.get_pixel(132, 46)[3] > 200);
-        assert!(a.hit([132.0, 54.0], 1.0), "Wing can be selected");
+        assert!(image.get_pixel(120, 54)[3] > 200);
+        assert!(image.get_pixel(120, 46)[3] > 200);
+        assert!(a.hit([120.0, 54.0], 1.0), "Wing can be selected");
         assert!(a.hit([80.0, 50.0], 1.0), "Interior can be selected");
         assert!(!a.hit([80.0, 80.0], 1.0));
         a.b = a.a;
         assert!(!a.hit([100.0, 80.0], 1.0));
     }
     #[test]
-    fn long_arrow_keeps_an_open_head_proportional_to_its_length() {
+    fn gallery_four_arrow_keeps_proportions_and_uniform_fade() {
         let cancel = AtomicBool::new(false);
-        let a = Annotation::new(Kind::Arrow, [20.0, 100.0], [720.0, 100.0], 2.0);
+        let mut a = Annotation::new(Kind::Arrow, [20.0, 100.0], [720.0, 100.0], 2.0);
+        a.effects.fade_in = 2.0;
         let image =
             rasterize_scene(std::slice::from_ref(&a), [760, 220], 1.0, 2.0, &cancel).unwrap();
-        assert!(image.get_pixel(670, 133)[3] > 200);
-        assert!(image.get_pixel(670, 67)[3] > 200);
+        assert_eq!(image.get_pixel(670, 115)[3], 128);
+        assert_eq!(image.get_pixel(670, 100)[3], 128);
+        assert_eq!(image.get_pixel(350, 100)[3], 128);
         assert_eq!(
-            image.get_pixel(670, 115)[3],
+            image.get_pixel(560, 140)[3],
             0,
-            "Open space between shaft and wing"
+            "Concave neck is not filled"
         );
-        assert!(a.hit([670.0, 133.0], 1.0));
+        assert!(a.hit([670.0, 115.0], 1.0));
     }
     #[test]
     fn spotlight_preserves_inner_pixels_and_fades_outer_dimming() {

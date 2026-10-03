@@ -255,9 +255,10 @@ keep a copy if you need to use an older executable.
 
 ## Annotation effects
 
-Arrows use three filled tapered shapes: a central shaft and two wings.
+Arrows use the filled tapered silhouette from ArrowGallery method 4, including
+its gently curved tip. A single mesh keeps opacity uniform during fades.
 Drag the two endpoint handles to orient and resize it; color and thickness style
-the filled parts. The same shape is used in preview, fullscreen, MP4, and GIF exports.
+the silhouette's width. The same shape is used in preview, fullscreen, MP4, and GIF exports.
 
 Select an annotation, then use the **Effects** dropdown below its style controls.
 Only one effect can be active:

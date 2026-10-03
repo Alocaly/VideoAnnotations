@@ -185,21 +185,7 @@ impl Annotation {
     }
     pub fn hit(&self, point: [f32; 2], tolerance: f32) -> bool {
         if self.kind == Kind::Arrow {
-            return self.arrow_parts().into_iter().any(|outline| {
-                let edges = (0..4).map(|i| (outline[i], outline[(i + 1) % 4]));
-                let mut positive = false;
-                let mut negative = false;
-                for (a, b) in edges {
-                    if segment_distance(point, a, b) <= tolerance + self.thickness * 0.5 {
-                        return true;
-                    }
-                    let cross =
-                        (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
-                    positive |= cross > 0.0;
-                    negative |= cross < 0.0;
-                }
-                !(positive && negative) && self.a != self.b
-            });
+            return crate::arrow::hit(self, point, tolerance);
         }
         if self.kind == Kind::Line {
             return segment_distance(point, self.a, self.b) <= tolerance + self.thickness * 0.5;

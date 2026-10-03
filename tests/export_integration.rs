@@ -19,6 +19,38 @@ fn tool(name: &str) -> PathBuf {
             if local.is_file() { local } else { name.into() }
         })
 }
+
+#[test]
+#[ignore = "requires FFmpeg and ffprobe"]
+fn gallery_four_arrow_exports_connected_head_with_uniform_fade() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("arrow.mp4");
+    let mut project = fixture(&source, false);
+    let mut a = Annotation::new(Kind::Arrow, [10.0, 50.0], [150.0, 50.0], 2.0);
+    a.color = [255, 100, 0, 255];
+    a.effects.fade_in = 2.0;
+    project.annotations.push(a);
+    for (format, extension) in [
+        (export::Format::Mp4, "mp4"),
+        (
+            export::Format::Gif {
+                width: 160,
+                fps: 10,
+            },
+            "gif",
+        ),
+    ] {
+        let out = dir.path().join(format!("arrow-fade.{extension}"));
+        export::export_with_format(&project, &out, format, &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+        let shaft = pixel(&out, 1.0, 80, 50);
+        let head = pixel(&out, 1.0, 130, 50);
+        assert!((105..=150).contains(&shaft[0]));
+        assert!((105..=150).contains(&head[0]));
+        assert!((shaft[0] as i32 - head[0] as i32).abs() < 20);
+        assert!(pixel(&out, 0.0, 80, 50)[0] < 20);
+    }
+}
 fn fixture(path: &Path, audio: bool) -> Project {
     fixture_color(path, audio, "black")
 }

@@ -1,4 +1,5 @@
 pub mod annotations;
+pub mod arrow;
 pub mod document;
 pub mod export;
 pub mod media;
