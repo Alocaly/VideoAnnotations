@@ -255,6 +255,10 @@ keep a copy if you need to use an older executable.
 
 ## Annotation effects
 
+While paused, double-click a text annotation on the video to edit it in place.
+Enter inserts a new line; Ctrl+Enter or clicking outside accepts the edit;
+Escape restores the previous text. The Properties text field remains available.
+
 Arrows use the filled tapered silhouette from ArrowGallery method 4, including
 its gently curved tip. A single mesh keeps opacity uniform during fades.
 Drag the two endpoint handles to orient and resize it; color and thickness style

@@ -10,7 +10,13 @@ pub struct Editor {
     pub(crate) selected: Option<usize>,
     drag: Option<Drag>,
     rename: Option<RenameDraft>,
+    inline_text: Option<InlineText>,
     pub(crate) timeline_drag: Option<crate::timeline::TimelineDrag>,
+}
+struct InlineText {
+    index: usize,
+    original: String,
+    focus: bool,
 }
 struct RenameDraft {
     index: usize,
@@ -62,11 +68,13 @@ impl Mapping {
 
 impl Editor {
     pub(crate) fn select(&mut self, project: &mut Project, index: usize) {
+        self.inline_text = None; // Changing selection accepts the text edit.
         self.cancel(project);
         self.selected = Some(index);
     }
 
     pub(crate) fn reorder(&mut self, project: &mut Project, forward: bool) {
+        self.inline_text = None;
         self.cancel(project);
         if let Some(index) = self.selected {
             let target = if forward {
@@ -118,7 +126,7 @@ impl Editor {
             ui.small(match self.tool {
                 Some(Kind::Text) => "Click the video to add text. Edit its content in Properties.",
                 Some(_) => "Drag on the video to draw. Esc cancels.",
-                None => "Click to select; drag to move; drag a handle to resize.",
+                None => "Click to select; double-click text to edit; drag to move or resize.",
             });
         });
         pause
@@ -199,14 +207,18 @@ impl Editor {
                                     )
                                     .changed();
                             });
-                            ui.label("Text content");
-                            let response = ui.add(
-                                egui::TextEdit::multiline(&mut a.text)
-                                    .id(egui::Id::new(("annotation-text", self.selected)))
-                                    .desired_rows(3)
-                                    .desired_width(ui.available_width()),
-                            );
-                            pause |= response.has_focus();
+                            ui.label("Text content (also editable by double-clicking the video)");
+                            if self.inline_text.is_none() {
+                                let response = ui.add(
+                                    egui::TextEdit::multiline(&mut a.text)
+                                        .id(egui::Id::new(("annotation-text", self.selected)))
+                                        .desired_rows(3)
+                                        .desired_width(ui.available_width()),
+                                );
+                                pause |= response.has_focus();
+                            } else {
+                                ui.small("Editing directly on the video.");
+                            }
                         } else {
                             ui.horizontal(|ui| {
                                 ui.label("Thickness");
@@ -366,6 +378,11 @@ impl Editor {
         }
     }
     pub fn cancel(&mut self, project: &mut Project) {
+        if let Some(edit) = self.inline_text.take()
+            && let Some(a) = project.annotations.get_mut(edit.index)
+        {
+            a.text = edit.original;
+        }
         match self.drag.take() {
             Some(Drag::Create { index, .. }) => {
                 project.annotations.remove(index);
@@ -398,7 +415,7 @@ impl Editor {
             extent: [project.video.width as f32, project.video.height as f32],
         };
         let mut pause = false;
-        if ui.is_enabled() && !ui.ctx().text_edit_focused() {
+        if self.inline_text.is_none() && ui.is_enabled() && !ui.ctx().text_edit_focused() {
             if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
                 self.delete(project);
             }
@@ -406,7 +423,8 @@ impl Editor {
                 self.cancel(project);
             }
         }
-        if response.drag_started()
+        if self.inline_text.is_none()
+            && response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
             && rect.contains(origin)
         {
@@ -456,7 +474,8 @@ impl Editor {
                 }
             }
         }
-        if response.clicked()
+        if self.inline_text.is_none()
+            && response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
             && rect.contains(pos)
         {
@@ -484,6 +503,23 @@ impl Editor {
             } else if self.tool.is_none() {
                 self.selected = pick(project, point, 6.0 / map.scale(), time);
             }
+        }
+        if self.inline_text.is_none()
+            && self.tool.is_none()
+            && response.double_clicked()
+            && let Some(pos) = response
+                .interact_pointer_pos()
+                .filter(|p| rect.contains(*p))
+            && let Some(index) = pick(project, map.video(pos), 6.0 / map.scale(), time)
+            && project.annotations[index].kind == Kind::Text
+        {
+            self.selected = Some(index);
+            self.drag = None;
+            self.inline_text = Some(InlineText {
+                index,
+                original: project.annotations[index].text.clone(),
+                focus: true,
+            });
         }
         if let Some(drag) = &self.drag
             && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
@@ -554,11 +590,19 @@ impl Editor {
             }
         }
         let painter = ui.painter().with_clip_rect(rect);
-        for a in project
+        for (index, a) in project
             .annotations
             .iter()
-            .filter(|a| a.visible_at(time, project.video.duration))
+            .enumerate()
+            .filter(|(_, a)| a.visible_at(time, project.video.duration))
         {
+            if self
+                .inline_text
+                .as_ref()
+                .is_some_and(|edit| edit.index == index)
+            {
+                continue;
+            }
             video_annotations::render::paint_at(&painter, a, map.rect, map.extent, time);
         }
         if let Some(a) = self
@@ -598,6 +642,56 @@ impl Editor {
         }
         if self.tool.is_some() && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if let Some(mut edit) = self.inline_text.take() {
+            pause = true;
+            if let Some(a) = project.annotations.get_mut(edit.index) {
+                let (min, max) = a.bounds();
+                let edit_rect = Rect::from_two_pos(map.screen(min), map.screen(max));
+                let id = egui::Id::new(("inline-annotation-text", edit.index));
+                let first = edit.focus;
+                if first {
+                    ui.ctx().memory_mut(|m| m.request_focus(id));
+                    edit.focus = false;
+                }
+                let mut child =
+                    ui.new_child(egui::UiBuilder::new().id_salt(id).max_rect(edit_rect));
+                child.set_clip_rect(rect.intersect(edit_rect));
+                let response = child.add_sized(
+                    edit_rect.size(),
+                    egui::TextEdit::multiline(&mut a.text)
+                        .id(id)
+                        .font(egui::FontId::proportional(a.font_size * map.scale()))
+                        .text_color(Color32::from_rgb(a.color[0], a.color[1], a.color[2]))
+                        .desired_width(edit_rect.width())
+                        .margin(egui::Margin::ZERO)
+                        .hint_text("Type your text"),
+                );
+                if first {
+                    response.request_focus();
+                }
+                let cancel =
+                    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                let accept = ui
+                    .input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Enter))
+                    || self.tool.is_some()
+                    || (!first && response.lost_focus())
+                    || (!first
+                        && ui.input(|i| {
+                            i.pointer.any_click()
+                                && i.pointer
+                                    .interact_pos()
+                                    .is_some_and(|p| !edit_rect.contains(p))
+                        }));
+                if cancel {
+                    a.text = edit.original;
+                } else if !accept {
+                    self.inline_text = Some(edit);
+                }
+                if cancel || accept {
+                    ui.ctx().memory_mut(|m| m.surrender_focus(id));
+                }
+            }
         }
         pause
     }
@@ -699,6 +793,102 @@ mod tests {
         assert!(!editor.renaming());
     }
 
+    #[test]
+    fn double_click_edits_text_on_video_and_accepts_or_cancels() {
+        for mode in 0..3 {
+            let cancel = mode == 1;
+            let ctx = egui::Context::default();
+            let mut project = project();
+            let a = &mut project.annotations[0];
+            a.kind = Kind::Text;
+            a.a = [200.0, 100.0];
+            a.b = [900.0, 300.0];
+            a.text.clear();
+            let mut editor = Editor::default();
+            let pos = egui::pos2(150.0, 75.0);
+            for frame in 0..6 {
+                let modifiers = if frame == 5 && mode == 0 {
+                    egui::Modifiers::CTRL
+                } else {
+                    egui::Modifiers::NONE
+                };
+                let events = match frame {
+                    0 | 2 => vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers,
+                        },
+                    ],
+                    1 | 3 => vec![egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers,
+                    }],
+                    4 => vec![egui::Event::Text("Edited on video".into())],
+                    _ if mode == 2 => vec![
+                        egui::Event::PointerMoved(egui::pos2(800.0, 400.0)),
+                        egui::Event::PointerButton {
+                            pos: egui::pos2(800.0, 400.0),
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers,
+                        },
+                        egui::Event::PointerButton {
+                            pos: egui::pos2(800.0, 400.0),
+                            button: egui::PointerButton::Primary,
+                            pressed: false,
+                            modifiers,
+                        },
+                    ],
+                    _ => vec![egui::Event::Key {
+                        key: if cancel {
+                            egui::Key::Escape
+                        } else {
+                            egui::Key::Enter
+                        },
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                };
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            Pos2::ZERO,
+                            egui::vec2(1000.0, 600.0),
+                        )),
+                        time: Some(frame as f64 * 0.08),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(960.0, 540.0),
+                            egui::Sense::click_and_drag(),
+                        );
+                        editor.canvas(ui, &response, rect, &mut project, 1.0);
+                    },
+                );
+                output.textures_delta.clear();
+                if frame == 3 || frame == 4 {
+                    assert!(editor.inline_text.is_some());
+                    assert!(ctx.memory(|m| {
+                        m.has_focus(egui::Id::new(("inline-annotation-text", 0_usize)))
+                    }));
+                }
+            }
+            assert!(editor.inline_text.is_none());
+            assert_eq!(
+                project.annotations[0].text,
+                if cancel { "" } else { "Edited on video" }
+            );
+        }
+    }
     #[test]
     fn text_editor_retains_focus_when_status_widgets_change() {
         let ctx = egui::Context::default();
